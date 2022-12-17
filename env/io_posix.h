@@ -26,7 +26,10 @@
 #include "test_util/sync_point.h"
 #include "util/mutexlock.h"
 #include "util/thread_local.h"
-
+#include "db/version_edit.h"
+#include "liburing.h"
+#include <queue>
+#include <array>
 // For non linux platform, the following macros are used only as place
 // holder.
 #if !(defined OS_LINUX) && !(defined CYGWIN) && !(defined OS_AIX)
@@ -43,7 +46,56 @@
 #define POSIX_MADV_DONTNEED 4   /* [MC1] don't need these pages */
 #endif
 
+// zl: some global variables
+#define LIBURING_USE true
 namespace ROCKSDB_NAMESPACE {
+/* Need to find the initial point. */
+
+/* The maximum queue size */
+#define MAX_QUEUE_SIZE 100
+
+/* The min queue size, if no queue is available, wait for MIN_QUEUE_SIZE */
+#define MIN_QUEUE_SIZE 5
+// The struct pass to io_uring_set_data.
+struct uring_queue{
+  struct io_uring uring;
+  void* data = nullptr;
+  std::atomic<bool> running;
+  int count = 0;
+  struct FileMetaData* output_file;
+  std::array<uint64_t, 2> id;
+};
+enum uring_type;
+class Urings{
+  public:
+    Urings()
+    {
+      compaction_queue_depth = 0;
+      log_queue_depth = 0;
+      log_queue_size = 0;
+      compaction_queue_size = 0;
+      init = false;
+    }
+   ~Urings(){
+    /**/clear_all(uring_type::uring_compaction_type);
+    clear_all(uring_type::uring_log_type);
+    init = false;
+    printf("clear!\n");
+  }
+    struct uring_queue* get_empty_element(uring_type queue_type);
+    struct uring_queue* wait_for_queue(struct uring_queue* uptr);
+    bool init_queues(int compaction_num = 100, int log_num = 100, int compaction_depth = 1, int log_depth = 1);
+    bool init = false;
+  private: 
+    void clear_all(uring_type queue_type);
+    std::queue<struct uring_queue*> compaction_urings;
+    std::queue<struct uring_queue*> log_urings;
+    int compaction_queue_size = 0;
+    int log_queue_size = 0;
+    int compaction_queue_depth = 0;
+    int log_queue_depth = 0;
+};
+
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name);
 // file_name can be left empty if it is not unkown.
@@ -372,6 +424,11 @@ class PosixWritableFile : public FSWritableFile {
   virtual IOStatus Flush(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Sync(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Fsync(const IOOptions& opts, IODebugContext* dbg) override;
+  // Lei modified: writable file async declare
+  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
+  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
+  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq) override;
+
   virtual bool IsSyncThreadSafe() const override;
   virtual bool use_direct_io() const override { return use_direct_io_; }
   virtual void SetWriteLifeTimeHint(Env::WriteLifeTimeHint hint) override;
@@ -463,6 +520,12 @@ class PosixMmapFile : public FSWritableFile {
   virtual IOStatus Flush(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Sync(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Fsync(const IOOptions& opts, IODebugContext* dbg) override;
+
+  // Lei modified: mmap file async declare
+  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
+  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
+  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg,void** uq) override;
+
   virtual uint64_t GetFileSize(const IOOptions& opts,
                                IODebugContext* dbg) override;
   virtual IOStatus InvalidateCache(size_t offset, size_t length) override;

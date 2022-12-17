@@ -76,6 +76,13 @@ class TestFSWritableFile : public FSWritableFile {
                          IODebugContext* dbg) override;
   virtual IOStatus Flush(const IOOptions&, IODebugContext*) override;
   virtual IOStatus Sync(const IOOptions& options, IODebugContext* dbg) override;
+
+  // Lei annotation 
+  // virtual IOStatus AFsync(const IOOptions& options, IODebugContext* dbg) override
+  // {
+  //   return Sync(options, dbg);
+  // }
+  
   virtual IOStatus RangeSync(uint64_t /*offset*/, uint64_t /*nbytes*/,
                              const IOOptions& options,
                              IODebugContext* dbg) override;

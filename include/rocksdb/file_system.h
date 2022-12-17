@@ -36,7 +36,13 @@
 #include "rocksdb/thread_status.h"
 
 namespace ROCKSDB_NAMESPACE {
-
+// declaration
+struct uring_queue;
+class Urings;
+enum uring_type{
+  uring_compaction_type, 
+  uring_log_type
+};
 class FileLock;
 class FSDirectory;
 class FSRandomAccessFile;
@@ -49,7 +55,6 @@ struct ImmutableDBOptions;
 struct MutableDBOptions;
 class RateLimiter;
 struct ConfigOptions;
-
 using AccessPattern = RandomAccessFile::AccessPattern;
 using FileAttributes = Env::FileAttributes;
 
@@ -1034,7 +1039,15 @@ class FSWritableFile {
   virtual IOStatus Flush(const IOOptions& options, IODebugContext* dbg) = 0;
   virtual IOStatus Sync(const IOOptions& options,
                         IODebugContext* dbg) = 0;  // sync data
-
+  // Lei modified: virtual ASync
+  virtual IOStatus ASync(const IOOptions& options,
+                        IODebugContext* dbg, void ** uq, 
+                        uring_type queue_type) {
+                          return Sync(options, dbg);
+                        }
+  virtual IOStatus WaitASync(const IOOptions& options, IODebugContext* dbg, void** uq){
+    return IOStatus::OK();
+  }
   /*
    * Sync data and/or metadata as well.
    * By default, sync only data.
@@ -1045,6 +1058,11 @@ class FSWritableFile {
     return Sync(options, dbg);
   }
 
+  // Lei modified: virtual AFsync
+  virtual IOStatus AFsync(const IOOptions& options, IODebugContext* dbg, void** uq, uring_type queue_type){ //
+    // Huyp: Just avoid undefined reference to `vtable
+    return Fsync(options, dbg);
+  }
   // true if Sync() and Fsync() are safe to call concurrently with Append()
   // and Flush().
   virtual bool IsSyncThreadSafe() const { return false; }
@@ -1163,7 +1181,7 @@ class FSWritableFile {
 
   // If you're adding methods here, remember to add them to
   // WritableFileWrapper too.
-
+  
  protected:
   size_t preallocation_block_size() { return preallocation_block_size_; }
 

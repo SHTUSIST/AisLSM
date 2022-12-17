@@ -283,6 +283,14 @@ class LegacyWritableFileWrapper : public FSWritableFile {
                  IODebugContext* /*dbg*/) override {
     return status_to_io_status(target_->Fsync());
   }
+
+  // Lei modified: LegacyWritableFileWrapper
+  // IOStatus AFsync(const IOOptions& /*options*/, IODebugContext* /*dbg*/) override
+  // {
+  //   //return status_to_io_status(target_->AFSync()); /* Bug here*/
+  //   return IOStatus::OK();
+  // }
+  
   bool IsSyncThreadSafe() const override { return target_->IsSyncThreadSafe(); }
 
   bool use_direct_io() const override { return target_->use_direct_io(); }

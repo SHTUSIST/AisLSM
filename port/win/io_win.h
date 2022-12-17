@@ -231,6 +231,12 @@ class WinMmapFile : private WinFileData, public FSWritableFile {
    */
   IOStatus Fsync(const IOOptions& options, IODebugContext* dbg) override;
 
+  // Lei annotation 
+  //IOStatus AFsync(const IOOptions& options, IODebugContext* dbg) override
+  //{
+  //  return Fsync(optins, dbg);
+  //}
+
   /**
    * Get the size of valid data in the file. This will not match the
    * size that is returned from the filesystem because we use mmap
@@ -398,7 +404,10 @@ class WinWritableFile : private WinFileData,
   IOStatus Sync(const IOOptions& options, IODebugContext* dbg) override;
 
   IOStatus Fsync(const IOOptions& options, IODebugContext* dbg) override;
-
+  
+  //Lei annotation 
+  //IOStatus AFsync(const IOOptions& options, IODebugContext* dbg) override;
+  
   virtual bool IsSyncThreadSafe() const override;
 
   // Indicates if the class makes use of direct I/O

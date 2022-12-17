@@ -420,7 +420,14 @@ class MockWritableFile : public FSWritableFile {
   IOStatus Sync(const IOOptions& options, IODebugContext* dbg) override {
     return file_->Fsync(options, dbg);
   }
-
+  
+  // Lei annotation
+  // IOStatus AFsync(const IOOptions& options, IODebugContext* dbg) override
+  // {
+  //   //return status_to_io_status(target_->AFSync()); /* Bug here*/
+  //   return IOStatus::OK();
+  // }
+  
   uint64_t GetFileSize(const IOOptions& /*options*/,
                        IODebugContext* /*dbg*/) override {
     return file_->Size();

@@ -11,9 +11,10 @@
 #include "db/compaction/compaction_outputs.h"
 
 #include "db/builder.h"
+#include "rocksdb/file_system.h"
 
 namespace ROCKSDB_NAMESPACE {
-
+extern Urings urings;
 void CompactionOutputs::NewBuilder(const TableBuilderOptions& tboptions) {
   builder_.reset(NewTableBuilder(tboptions, file_writer_.get()));
 }
@@ -57,16 +58,25 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
                                             Statistics* statistics,
                                             bool use_fsync) {
   IOStatus io_s;
+  void* uq;
   if (input_status.ok()) {
     StopWatch sw(clock, statistics, COMPACTION_OUTFILE_SYNC_MICROS);
-    io_s = file_writer_->Sync(use_fsync);
+    //Lei modified: Here subcompaction sync and output.
+    printf("ASync: Compaction\n");
+    io_s = file_writer_->ASync(use_fsync, &uq, uring_type::uring_compaction_type);
+    file_writer_->WaitASync(uq);
+    //io_s = file_writer_->Sync(use_fsync);
   }
   if (input_status.ok() && io_s.ok()) {
     io_s = file_writer_->Close();
   }
 
   if (input_status.ok() && io_s.ok()) {
-    FileMetaData* meta = GetMetaData();
+    FileMetaData* meta = GetMetaData(); 
+    //Lei modified: Add uq.
+    // printf("ASync: meta number %ld\n", meta->fd.GetNumber());
+    meta->uq = uq;
+    static_cast<struct uring_queue*>(uq)->id = meta->unique_id;
     meta->file_checksum = file_writer_->GetFileChecksum();
     meta->file_checksum_func_name = file_writer_->GetFileChecksumFuncName();
   }

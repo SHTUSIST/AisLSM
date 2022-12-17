@@ -323,7 +323,7 @@ class EncryptedWritableFile : public FSWritableFile {
   using FSWritableFile::Append;
   IOStatus Append(const Slice& data, const IOOptions& options,
                   IODebugContext* dbg) override;
-
+  
   using FSWritableFile::PositionedAppend;
   IOStatus PositionedAppend(const Slice& data, uint64_t offset,
                             const IOOptions& options,
@@ -388,6 +388,11 @@ class EncryptedWritableFile : public FSWritableFile {
   IOStatus Flush(const IOOptions& options, IODebugContext* dbg) override;
 
   IOStatus Sync(const IOOptions& options, IODebugContext* dbg) override;
+  // Lei annotation
+  // IOStatus AFsync(const IOOptions& options, IODebugContext* dbg) override
+  // {
+  //   return Sync(options, dbg);
+  // }
 
   IOStatus Close(const IOOptions& options, IODebugContext* dbg) override;
 };

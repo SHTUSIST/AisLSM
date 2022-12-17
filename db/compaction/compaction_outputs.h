@@ -184,6 +184,11 @@ class CompactionOutputs {
     return range_del_agg_ && !range_del_agg_->IsEmpty();
   }
 
+  // Lei modified: get 
+  WritableFileWriter* GetFileWriter(){
+    return file_writer_.get();
+  }
+
  private:
   friend class SubcompactionState;
 

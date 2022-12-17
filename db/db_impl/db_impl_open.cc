@@ -25,7 +25,15 @@
 #include "test_util/sync_point.h"
 #include "util/rate_limiter.h"
 
+#include "env/io_posix.h"
+#include <iostream>
+#include <liburing.h>
+#include <queue>
+#include "liburing.h"
 namespace ROCKSDB_NAMESPACE {
+
+// The global urings.
+Urings urings;
 Options SanitizeOptions(const std::string& dbname, const Options& src,
                         bool read_only, Status* logger_creation_s) {
   auto db_options =
@@ -1630,6 +1638,15 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
         ColumnFamilyDescriptor(kPersistentStatsColumnFamilyName, cf_options));
   }
   std::vector<ColumnFamilyHandle*> handles;
+
+  // zl: Initialization, initialize the uring only when it should be used and not init.
+  // LIBURING_USE now is #define LIBURING_USE true, future it should be made as a option. 
+
+  if(LIBURING_USE && !urings.init)
+  {
+    /* Init all queues */
+    urings.init_queues(50,2);
+  }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {
     if (db_options.persist_stats_to_disk) {

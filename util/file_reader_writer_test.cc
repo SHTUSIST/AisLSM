@@ -63,6 +63,13 @@ TEST_F(WritableFileWriterTest, RangeSync) {
                    IODebugContext* /*dbg*/) override {
       return IOStatus::OK();
     }
+
+    // Lei annotation
+    // IOStatus AFsync(const IOOptions& /*options*/,
+    //                IODebugContext* /*dbg*/) override {
+    //   return IOStatus::OK();
+    // }
+
     void SetIOPriority(Env::IOPriority /*pri*/) override {}
     uint64_t GetFileSize(const IOOptions& /*options*/,
                          IODebugContext* /*dbg*/) override {
@@ -176,6 +183,11 @@ TEST_F(WritableFileWriterTest, IncrementalBuffer) {
                    IODebugContext* /*dbg*/) override {
       return IOStatus::OK();
     }
+    // Lei annotation
+    // IOStatus AFsync(const IOOptions& /*options*/,
+    //                IODebugContext* /*dbg*/) override {
+    //   return IOStatus::OK();
+    // }
     void SetIOPriority(Env::IOPriority /*pri*/) override {}
     uint64_t GetFileSize(const IOOptions& /*options*/,
                          IODebugContext* /*dbg*/) override {
@@ -458,6 +470,11 @@ TEST_F(WritableFileWriterTest, AppendStatusReturn) {
                   IODebugContext* /*dbg*/) override {
       return IOStatus::OK();
     }
+    // Lei annotation
+    //IOStatus AFsync(const IOOptions& /*options*/,
+    //              IODebugContext* /*dbg*/) override {
+    //  return IOStatus::OK();
+    //}
     void Setuse_direct_io(bool val) { use_direct_io_ = val; }
     void SetIOError(bool val) { io_error_ = val; }
 
@@ -854,7 +871,11 @@ TEST_F(DBWritableFileWriterTest, IOErrorNotification) {
                   IODebugContext* /*dbg*/) override {
       return IOStatus::OK();
     }
-
+    // Lei annotation
+    // IOStatus AFsync(const IOOptions& /*options*/,
+    //               IODebugContext* /*dbg*/) override {
+    //   return IOStatus::OK();
+    // }
     void SetIOError(bool val) { io_error_ = val; }
 
     void CheckCounters(int file_append_errors, int file_flush_errors) {

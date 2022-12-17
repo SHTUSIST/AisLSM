@@ -22,8 +22,10 @@
 #include "util/crc32c.h"
 #include "util/random.h"
 #include "util/rate_limiter.h"
+#include "rocksdb/file_system.h"
 
 namespace ROCKSDB_NAMESPACE {
+extern Urings urings;
 IOStatus WritableFileWriter::Create(const std::shared_ptr<FileSystem>& fs,
                                     const std::string& fname,
                                     const FileOptions& file_opts,
@@ -418,6 +420,9 @@ IOStatus WritableFileWriter::Flush(Env::IOPriority op_rate_limiter_priority) {
       assert(offset_sync_to >= last_sync_size_);
       if (offset_sync_to > 0 &&
           offset_sync_to - last_sync_size_ >= bytes_per_sync_) {
+        
+        // Lei Warning: This could be an problem for log sync twice?
+        printf("Warnning! log may sync twice.\n");
         s = RangeSync(last_sync_size_, offset_sync_to - last_sync_size_);
         if (!s.ok()) {
           set_seen_error();
@@ -460,6 +465,30 @@ IOStatus WritableFileWriter::Sync(bool use_fsync) {
   TEST_KILL_RANDOM("WritableFileWriter::Sync:0");
   if (!use_direct_io() && pending_sync_) {
     s = SyncInternal(use_fsync);
+    if (!s.ok()) {
+      set_seen_error();
+      return s;
+    }
+  }
+  TEST_KILL_RANDOM("WritableFileWriter::Sync:1");
+  pending_sync_ = false;
+  return IOStatus::OK();
+}
+
+// Lei modified: ASync in WritableFileWriter
+IOStatus WritableFileWriter::ASync(bool use_fsync, void** uq, uring_type queue_type) {
+  if (seen_error()) {
+    return AssertFalseAndGetStatusForPrevError();
+  }
+
+  IOStatus s = Flush();
+  if (!s.ok()) {
+    set_seen_error();
+    return s;
+  }
+  TEST_KILL_RANDOM("WritableFileWriter::Sync:0");
+  if (!use_direct_io() && pending_sync_) {
+    s = ASyncInternal(use_fsync, uq, queue_type);
     if (!s.ok()) {
       set_seen_error();
       return s;
@@ -514,6 +543,88 @@ IOStatus WritableFileWriter::SyncInternal(bool use_fsync) {
   } else {
     s = writable_file_->Sync(io_options, nullptr);
   }
+#ifndef ROCKSDB_LITE
+  if (ShouldNotifyListeners()) {
+    auto finish_ts = std::chrono::steady_clock::now();
+    NotifyOnFileSyncFinish(
+        start_ts, finish_ts, s,
+        use_fsync ? FileOperationType::kFsync : FileOperationType::kSync);
+    if (!s.ok()) {
+      NotifyOnIOError(
+          s, (use_fsync ? FileOperationType::kFsync : FileOperationType::kSync),
+          file_name());
+    }
+  }
+#endif
+  SetPerfLevel(prev_perf_level);
+
+  // The caller will be responsible to call set_seen_error() if s is not OK.
+  return s;
+}
+IOStatus WritableFileWriter::WaitASync(void** uq)
+{
+  IOOptions io_options;
+  //io_options.rate_limiter_priority = writable_file_->GetIOPriority();
+  IOStatus s = writable_file_->WaitASync(io_options, nullptr, uq);
+  return s;
+}
+// Lei modified: ASyncInternal in WritableFileWriter
+IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, void** uq, uring_type queue_type) {
+  // Caller is supposed to check seen_error_
+  IOStatus s;
+  IOSTATS_TIMER_GUARD(fsync_nanos);
+  TEST_SYNC_POINT("WritableFileWriter::SyncInternal:0");
+  auto prev_perf_level = GetPerfLevel();
+
+  IOSTATS_CPU_TIMER_GUARD(cpu_write_nanos, clock_);
+
+#ifndef ROCKSDB_LITE
+  FileOperationInfo::StartTimePoint start_ts;
+  if (ShouldNotifyListeners()) {
+    start_ts = FileOperationInfo::StartNow();
+  }
+#endif
+
+  IOOptions io_options;
+  io_options.rate_limiter_priority = writable_file_->GetIOPriority();
+  /*if (use_fsync) {
+    #ifndef LIBURING_USE
+    s = writable_file_->Fsync(io_options, nullptr);
+    #else
+    s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
+    #endif
+  } else {
+    #ifndef LIBURING_USE
+    s = writable_file_->Sync(io_options, nullptr);
+    #else
+    s = writable_file_->ASync(io_options, nullptr, uq, queue_type);
+    #endif
+  }*/
+  if(use_fsync)
+  {
+    if(urings.init)
+    {
+      s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
+    }
+    else
+    {
+      s = writable_file_->Fsync(io_options, nullptr);
+    }
+  }
+  else
+  {
+    if(urings.init)
+    {
+      //huyp:modify bug
+      s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
+    }
+    else
+    {
+      s = writable_file_->Sync(io_options, nullptr);
+    }
+  }
+  
+
 #ifndef ROCKSDB_LITE
   if (ShouldNotifyListeners()) {
     auto finish_ts = std::chrono::steady_clock::now();

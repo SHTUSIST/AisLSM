@@ -39,6 +39,7 @@
 #include "util/autovector.h"
 #include "util/coding.h"
 #include "util/string_util.h"
+#include "rocksdb/file_system.h"
 
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
@@ -47,6 +48,162 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern Urings urings;
+extern std::atomic<int> uring_counter;
+
+//zl: Add some functions 
+bool Urings::init_queues(int compaction_num, int log_num, int compaction_depth, int log_depth)
+{
+  int init_lib = true;
+  this->compaction_queue_size = compaction_num;
+  this->log_queue_size = log_num;
+  this->compaction_queue_depth = compaction_depth;
+  this->log_queue_depth = log_depth;zz
+  for(int i = 0; i < compaction_num; ++i)
+    {
+      struct uring_queue* qptr;
+      qptr = new struct uring_queue();
+      qptr->data = nullptr;
+      qptr->running = false;
+      qptr->count = i;
+      qptr->id = {0, 0};
+      if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
+      {
+        init_lib = false;
+        break;
+      }
+      compaction_urings.push(qptr);
+      //compaction_urings->push(std::move(qptr));
+    }
+    // Failed to init, then delete all elements.
+    if(!init_lib)
+    {
+      clear_all(uring_type::uring_compaction_type);
+      return false;
+    }
+    for(int i = 0; i < log_num; ++i)
+    {
+      struct uring_queue* qptr;
+      qptr = new struct uring_queue();
+      qptr->data = nullptr;
+      qptr->running = false;
+      qptr->count = i;
+      qptr->id = {0, 0};
+      qptr->output_file = nullptr;
+      if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
+      {
+        init_lib = false;
+        break;
+      }
+      log_urings.push(qptr);
+      //log_urings->push(std::move(qptr));
+    }
+    if(!init_lib)
+    {
+      clear_all(uring_type::uring_log_type);
+      return false;
+    }
+    this->init = true;
+    return true;
+}
+void Urings::clear_all(uring_type queue_type)
+{
+  struct uring_queue* uptr= nullptr;
+  std::queue<struct uring_queue*>* rings = nullptr;
+  switch(queue_type)
+  {
+    case uring_type::uring_compaction_type:
+      rings = &(this->compaction_urings);
+      break;
+    case uring_type::uring_log_type:
+      rings = &(this->log_urings);
+      break;
+    default:
+    break;
+  }
+  while(!rings->empty())
+  {
+    uptr = rings->front();
+    /*if(uptr->running)
+    {
+      wait_for_queue(uptr);
+    }*/
+    io_uring_queue_exit(&(uptr->uring));
+    rings->pop();
+    delete uptr;
+    rings->pop();
+  }
+
+}
+struct uring_queue* Urings::get_empty_element(uring_type queue_type)
+{
+  std::queue<struct uring_queue*>* rings = nullptr;
+  switch(queue_type)
+  {
+    case uring_type::uring_compaction_type:
+      rings = &(this->compaction_urings);
+      break;
+    case uring_type::uring_log_type:
+      rings = &(this->log_urings);
+      break;
+    default:
+      printf("wrong type\n");
+      break;
+  }
+ struct uring_queue* uptr = rings->front();
+  struct io_uring_cqe* cqe = nullptr;
+  while(uptr->running)
+  {
+    // zl: change the logic
+    if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
+    {
+      io_uring_cqe_seen(&uptr->uring, cqe);
+      if((queue_type == uring_type::uring_compaction_type))
+      {
+        printf("filematadata\n");
+        uptr->output_file = nullptr;
+
+      }
+      else if ((queue_type == uring_type::uring_log_type))
+      {
+        printf("memtable\n");
+      }
+      else
+        printf("strange\n");
+      uptr->data = nullptr;
+      uptr->running.store(false);
+      break;
+    }
+    else
+    {
+      //rings->push(std::move(uptr));
+      rings->push(uptr);
+      rings->pop();
+      uptr = rings->front();
+    }
+    // zl: move the full queue to the end. 
+  }
+  rings->push(uptr);
+  rings->pop();
+  uptr->running.store(true);
+  return uptr;
+}
+struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
+{
+  if(!uptr->running) return uptr;
+  struct io_uring * ptr = &(uptr->uring);
+  struct io_uring_cqe* cqe = nullptr;
+  int ret = io_uring_wait_cqe(ptr, &cqe);
+  io_uring_cqe_seen(&uptr->uring, cqe);
+  if(ret < 0)
+  {
+    printf("invalid io_uring_wait_cqe\n");
+    return nullptr;
+  }
+  uptr->output_file = nullptr;
+  uptr->running.store(false);
+  return uptr;
+}
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name) {
   if (file_name.empty()) {
@@ -1214,6 +1371,19 @@ IOStatus PosixMmapFile::Fsync(const IOOptions& /*opts*/,
   return Msync();
 }
 
+// Lei Todo: this is for mmapFile
+IOStatus PosixMmapFile::ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type){
+  return Sync(opts, dbg);
+}
+
+IOStatus PosixMmapFile::AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type){
+  return Fsync(opts, dbg);
+}
+IOStatus PosixMmapFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq)
+{
+  return IOStatus::OK();
+}
+
 /**
  * Get the size of valid data in the file. This will not match the
  * size that is returned from the filesystem because we use mmap
@@ -1302,7 +1472,6 @@ IOStatus PosixWritableFile::Append(const Slice& data, const IOOptions& /*opts*/,
   }
   const char* src = data.data();
   size_t nbytes = data.size();
-
   if (!PosixWrite(fd_, src, nbytes)) {
     return IOError("While appending to file", filename_, errno);
   }
@@ -1345,8 +1514,9 @@ IOStatus PosixWritableFile::Truncate(uint64_t size, const IOOptions& /*opts*/,
 
 IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/) {
+                                    struct io_uring_cqe* cqe = nullptr;
   IOStatus s;
-
+  //
   size_t block_size;
   size_t last_allocated_block;
   GetPreallocationStatus(&block_size, &last_allocated_block);
@@ -1427,6 +1597,80 @@ IOStatus PosixWritableFile::Fsync(const IOOptions& /*opts*/,
   return IOStatus::OK();
 }
 
+// Lei modified: this is for normal writable file
+IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
+                                  IODebugContext* /*dbg*/, void ** uq, uring_type queue_type){
+  
+  
+  struct uring_queue* uq_t = urings.get_empty_element(queue_type);
+  *uq = static_cast<void*> (uq_t);
+  if(uq_t == nullptr)
+  {
+    printf("No more uq_t available for fsync !\n");
+  }
+  struct io_uring *uptr = &uq_t->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uptr);
+  if(sqe == nullptr)
+  {
+    printf("No more sqe available for fsync !\n");
+  }
+
+  // Lei Todo: this place should act like fdatasync, which means having flag IORING_FSYNC_DATASYNC.
+  io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  // Set data can transmit datas
+  //io_uring_sqe_set_data(sqe, (void*) uq);
+  struct io_uring_cqe* cqe = nullptr;
+
+  int ret = io_uring_submit(uptr);
+  if(ret <= 0)
+  {
+    printf("Submition failed of fsync !\n");
+  }
+
+  printf("ASync: fd:%d, uq: %p\n", fd_, &uq_t);
+  return IOStatus::OK();
+}
+
+// zl: AFsync: Each time add a new function should change many classes... 
+IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
+                                  IODebugContext* /*dbg*/, void ** uq, uring_type queue_type)
+{
+
+  struct uring_queue* uq_t = urings.get_empty_element(queue_type);
+  *uq = static_cast<void*>(uq_t);
+  if(uq_t == nullptr)
+  {
+    printf("No more uq_t available for fsync !\n");
+  }
+  struct io_uring *uptr = &uq_t->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uptr);
+  if(sqe == nullptr)
+  {
+    printf("No more sqe available for fsync !\n");
+  }
+
+  // Lei Todo: this place should act like fsync, which means no flag IORING_FSYNC_DATASYNC.
+  io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  // Set data can transmit datas
+  //io_uring_sqe_set_data(sqe, (void*) uq);
+  struct io_uring_cqe* cqe = nullptr;
+
+  int ret = io_uring_submit(uptr);
+  if(ret <= 0)
+  {
+    printf("Submition failed of fsync !\n");
+  }
+  printf("AFSync: fd:%d, uq: %p\n", fd_, uq_t);
+  return IOStatus::OK();
+}
+
+IOStatus PosixWritableFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq)
+{
+  struct uring_queue* uq_t = static_cast<struct uring_queue*>(*uq);
+  urings.wait_for_queue(uq_t);
+  // printf("WaitASync: uq: %p\n", uq_t);
+  return IOStatus::OK();
+}
 bool PosixWritableFile::IsSyncThreadSafe() const { return true; }
 
 uint64_t PosixWritableFile::GetFileSize(const IOOptions& /*opts*/,

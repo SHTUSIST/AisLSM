@@ -261,6 +261,11 @@ class WritableFileWriter {
 
   IOStatus Sync(bool use_fsync);
 
+  // Lei modified: Async declare
+  IOStatus ASync(bool use_fsync, void** uq, uring_type queue_type);
+
+  IOStatus WaitASync(void** uq);
+
   // Sync only the data that was already Flush()ed. Safe to call concurrently
   // with Append() and Flush(). If !writable_file_->IsSyncThreadSafe(),
   // returns NotSupported status.
@@ -332,5 +337,7 @@ class WritableFileWriter {
                                      Env::IOPriority op_rate_limiter_priority);
   IOStatus RangeSync(uint64_t offset, uint64_t nbytes);
   IOStatus SyncInternal(bool use_fsync);
+  // Lei modified: ASyncInternal declare
+  IOStatus ASyncInternal(bool use_fsync, void** uq, uring_type queue_type);
 };
 }  // namespace ROCKSDB_NAMESPACE
