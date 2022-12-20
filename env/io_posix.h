@@ -61,9 +61,8 @@ struct uring_queue{
   struct io_uring uring;
   void* data = nullptr;
   std::atomic<bool> running;
-  int count = 0;
-  struct FileMetaData* output_file;
-  std::array<uint64_t, 2> id;
+  uint8_t count = 0;
+  uint16_t id;
 };
 enum uring_type;
 class Urings{
@@ -77,23 +76,30 @@ class Urings{
       init = false;
     }
    ~Urings(){
-    /**/clear_all(uring_type::uring_compaction_type);
-    clear_all(uring_type::uring_log_type);
     init = false;
     printf("clear!\n");
   }
-    struct uring_queue* get_empty_element(uring_type queue_type);
+    struct uring_queue* get_empty_element(int id);
+    //struct uring_queue* get_empty_element(int id); //id is job id.
     struct uring_queue* wait_for_queue(struct uring_queue* uptr);
-    bool init_queues(int compaction_num = 100, int log_num = 100, int compaction_depth = 1, int log_depth = 1);
+    bool init_queues(uint16_t compaction_num = 100, uint8_t log_num = 100, uint16_t compaction_depth = 1, uint8_t log_depth = 1);
     bool init = false;
   private: 
     void clear_all(uring_type queue_type);
-    std::queue<struct uring_queue*> compaction_urings;
-    std::queue<struct uring_queue*> log_urings;
-    int compaction_queue_size = 0;
-    int log_queue_size = 0;
-    int compaction_queue_depth = 0;
-    int log_queue_depth = 0;
+    uint16_t get_id(uint16_t num, uint16_t mask);
+    struct uring_queue* get_empty_element_for_compaction();
+    struct uring_queue* get_empty_element_for_log();
+    struct uring_queue* wait_for_compaction(struct uring_queue* uptr);
+    struct uring_queue* wait_for_log(struct uring_queue* uptr);
+    struct uring_queue** compaction_urings = nullptr;
+    struct uring_queue** log_urings = nullptr;
+    uint16_t compaction_queue_size = 0;
+    uint16_t log_queue_size = 0;
+    uint8_t compaction_queue_depth = 0;
+    uint8_t log_queue_depth = 0;
+    uint16_t log_counter = 0;
+    uint16_t compaction_counter = 0;
+    bool bit;
 };
 
 std::string IOErrorMsg(const std::string& context,
@@ -425,9 +431,9 @@ class PosixWritableFile : public FSWritableFile {
   virtual IOStatus Sync(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Fsync(const IOOptions& opts, IODebugContext* dbg) override;
   // Lei modified: writable file async declare
-  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
-  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
-  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq) override;
+  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
 
   virtual bool IsSyncThreadSafe() const override;
   virtual bool use_direct_io() const override { return use_direct_io_; }
@@ -522,9 +528,9 @@ class PosixMmapFile : public FSWritableFile {
   virtual IOStatus Fsync(const IOOptions& opts, IODebugContext* dbg) override;
 
   // Lei modified: mmap file async declare
-  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
-  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type) override;
-  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg,void** uq) override;
+  virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
 
   virtual uint64_t GetFileSize(const IOOptions& opts,
                                IODebugContext* dbg) override;

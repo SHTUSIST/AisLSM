@@ -13,6 +13,7 @@
 #include "options/cf_options.h"
 #include "rocksdb/sst_partitioner.h"
 #include "util/autovector.h"
+#include "env/io_posix.h"
 
 namespace ROCKSDB_NAMESPACE {
 // The file contains class Compaction, as well as some helper functions
@@ -67,6 +68,7 @@ class VersionStorageInfo;
 class CompactionFilter;
 
 // A Compaction encapsulates metadata about a compaction.
+//
 class Compaction {
  public:
   Compaction(VersionStorageInfo* input_version,
@@ -101,6 +103,8 @@ class Compaction {
   void operator=(const Compaction&) = delete;
 
   ~Compaction();
+  
+  struct uring_queue* uptr = nullptr;
 
   // Returns the level associated to the specified compaction input level.
   // If compaction_input_level is not specified, then input_level is set to 0.

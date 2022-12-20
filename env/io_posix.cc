@@ -12,6 +12,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #include <algorithm>
 #if defined(OS_LINUX)
@@ -40,6 +41,7 @@
 #include "util/coding.h"
 #include "util/string_util.h"
 #include "rocksdb/file_system.h"
+#include "db/version_set.h"
 
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
@@ -52,27 +54,31 @@ extern Urings urings;
 extern std::atomic<int> uring_counter;
 
 //zl: Add some functions 
-bool Urings::init_queues(int compaction_num, int log_num, int compaction_depth, int log_depth)
+bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint8_t log_depth)
 {
   int init_lib = true;
   this->compaction_queue_size = compaction_num;
   this->log_queue_size = log_num;
   this->compaction_queue_depth = compaction_depth;
-  this->log_queue_depth = log_depth;zz
-  for(int i = 0; i < compaction_num; ++i)
+  this->log_queue_depth = log_depth;
+  if(compaction_num > 0)
+    this->compaction_urings = new struct uring_queue* [compaction_num];
+  if(log_num > 0)
+    this->log_urings = new struct uring_queue* [log_num]; 
+  for(uint8_t i = 0; i < compaction_num; ++i)
     {
       struct uring_queue* qptr;
       qptr = new struct uring_queue();
       qptr->data = nullptr;
       qptr->running = false;
-      qptr->count = i;
-      qptr->id = {0, 0};
+      qptr->id = i;
+      qptr->count = 0;
       if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
       {
         init_lib = false;
         break;
       }
-      compaction_urings.push(qptr);
+      compaction_urings[i] = qptr;
       //compaction_urings->push(std::move(qptr));
     }
     // Failed to init, then delete all elements.
@@ -81,22 +87,20 @@ bool Urings::init_queues(int compaction_num, int log_num, int compaction_depth, 
       clear_all(uring_type::uring_compaction_type);
       return false;
     }
-    for(int i = 0; i < log_num; ++i)
+    for(uint8_t i = 0; i < log_num; ++i)
     {
       struct uring_queue* qptr;
       qptr = new struct uring_queue();
       qptr->data = nullptr;
       qptr->running = false;
-      qptr->count = i;
-      qptr->id = {0, 0};
-      qptr->output_file = nullptr;
+      qptr->count = 0;
+      qptr->id = i;
       if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
       {
         init_lib = false;
         break;
       }
-      log_urings.push(qptr);
-      //log_urings->push(std::move(qptr));
+      log_urings[i] = qptr;
     }
     if(!init_lib)
     {
@@ -106,101 +110,148 @@ bool Urings::init_queues(int compaction_num, int log_num, int compaction_depth, 
     this->init = true;
     return true;
 }
-void Urings::clear_all(uring_type queue_type)
+struct uring_queue* Urings::get_empty_element(int id)
 {
-  struct uring_queue* uptr= nullptr;
-  std::queue<struct uring_queue*>* rings = nullptr;
-  switch(queue_type)
-  {
-    case uring_type::uring_compaction_type:
-      rings = &(this->compaction_urings);
-      break;
-    case uring_type::uring_log_type:
-      rings = &(this->log_urings);
-      break;
-    default:
-    break;
-  }
-  while(!rings->empty())
-  {
-    uptr = rings->front();
-    /*if(uptr->running)
-    {
-      wait_for_queue(uptr);
-    }*/
-    io_uring_queue_exit(&(uptr->uring));
-    rings->pop();
-    delete uptr;
-    rings->pop();
-  }
-
-}
-struct uring_queue* Urings::get_empty_element(uring_type queue_type)
-{
-  std::queue<struct uring_queue*>* rings = nullptr;
-  switch(queue_type)
-  {
-    case uring_type::uring_compaction_type:
-      rings = &(this->compaction_urings);
-      break;
-    case uring_type::uring_log_type:
-      rings = &(this->log_urings);
-      break;
-    default:
-      printf("wrong type\n");
-      break;
-  }
- struct uring_queue* uptr = rings->front();
-  struct io_uring_cqe* cqe = nullptr;
+  uint8_t index = id % this->compaction_queue_size;
+  struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    // zl: change the logic
-    if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
+    struct io_uring_cqe* cqe = nullptr;
+    while(uptr->count > 0)
     {
-      io_uring_cqe_seen(&uptr->uring, cqe);
-      if((queue_type == uring_type::uring_compaction_type))
+      if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
       {
-        printf("filematadata\n");
-        uptr->output_file = nullptr;
-
+        io_uring_cqe_seen(&uptr->uring, cqe);
+        /* need to deal with data, not sure how to do it... */
       }
-      else if ((queue_type == uring_type::uring_log_type))
-      {
-        printf("memtable\n");
-      }
-      else
-        printf("strange\n");
+      uptr->count -= 1;
+    }
+    if(uptr->count == 0)
+    {
+      /* version unref() */
+      /* break a point at unref to see whether this works... */
+      //printf("filemetadata\n");
+      Version* v = static_cast<Version*>(uptr->data);
+      v->Unref();
       uptr->data = nullptr;
       uptr->running.store(false);
-      break;
     }
     else
     {
-      //rings->push(std::move(uptr));
-      rings->push(uptr);
-      rings->pop();
-      uptr = rings->front();
+      index += 1;
+      index %= this->compaction_queue_size;
     }
-    // zl: move the full queue to the end. 
   }
-  rings->push(uptr);
-  rings->pop();
   uptr->running.store(true);
   return uptr;
 }
+
+void Urings::clear_all(uring_type queue_type)
+{
+  switch(queue_type)
+  {
+    case uring_type::uring_compaction_type:
+      for(int i = 0; i < this->compaction_queue_size; ++i)
+      {
+        /*while(this->compaction_urings[i]->running)
+        {
+
+        }*/
+        io_uring_queue_exit(&(this->compaction_urings[i]->uring));
+      }
+      delete this->compaction_urings;
+      this->compaction_urings = nullptr;
+      this->compaction_queue_size = 0;
+      this->compaction_queue_depth = 0;
+      break;
+    case uring_type::uring_log_type:
+      for(int i = 0; i < this->log_queue_size; ++i)
+      {
+        io_uring_queue_exit(&(this->log_urings[i]->uring));
+      }
+      delete this->log_urings;
+      this->log_urings = nullptr;
+      this->log_queue_size = 0;
+      this->log_queue_depth = 0;
+      break;
+    default:
+      break;
+  }
+}
+struct uring_queue* Urings::get_empty_element_for_compaction()
+{
+  struct uring_queue* uptr = this->compaction_urings[this->compaction_counter];
+  while(uptr->running)
+  {
+    struct io_uring_cqe* cqe = nullptr;
+    while(uptr->count > 0)
+    {
+      if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
+      {
+        io_uring_cqe_seen(&uptr->uring, cqe);
+        /* need to deal with data, not sure how to do it... */
+      }
+      uptr->count -= 1;
+    }
+    if(uptr->count == 0)
+    {
+      /* version unref() */
+      /* break a point at unref to see whether this works... */
+      printf("filematadata\n");
+      uptr->data = nullptr;
+      uptr->running.store(false);
+    }
+    else
+    {
+      this->compaction_counter += 1;
+      this->compaction_counter %= this->compaction_queue_size;
+    }
+  }
+  uptr->running.store(true);
+  return uptr;
+}
+
+
+/* Wait for count times, data will reset to nullptr, need to store it before. */
+/* May need a uring_type to determine which function should be called.  */
 struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
 {
   if(!uptr->running) return uptr;
-  struct io_uring * ptr = &(uptr->uring);
-  struct io_uring_cqe* cqe = nullptr;
-  int ret = io_uring_wait_cqe(ptr, &cqe);
-  io_uring_cqe_seen(&uptr->uring, cqe);
-  if(ret < 0)
+  if(uptr->count > 0)
   {
-    printf("invalid io_uring_wait_cqe\n");
-    return nullptr;
+    struct io_uring_cqe* cqe[uptr->count];
+    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
+    //if(unlikely(ret < 0))
+    if(ret < 0)
+    {
+      printf("invalid io_uring_wait_cqe\n");
+      return nullptr;
+    }
+    while(uptr->count-- > 0)
+      io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
   }
-  uptr->output_file = nullptr;
+  uptr->data = nullptr;
+  uptr->running.store(false);
+  return uptr;
+}
+
+struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
+{
+  if(!uptr->running) return uptr;
+  if(uptr->count > 0)
+  {
+    struct io_uring_cqe* cqe[uptr->count];
+    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
+    //if(unlikely(ret < 0))
+    if(ret < 0)
+    {
+      printf("invalid io_uring_wait_cqe\n");
+      return nullptr;
+    }
+    while(uptr->count-- > 0)
+      io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
+  }
+  uptr->data = nullptr;
   uptr->running.store(false);
   return uptr;
 }
@@ -1372,14 +1423,14 @@ IOStatus PosixMmapFile::Fsync(const IOOptions& /*opts*/,
 }
 
 // Lei Todo: this is for mmapFile
-IOStatus PosixMmapFile::ASync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type){
+IOStatus PosixMmapFile::ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr){
   return Sync(opts, dbg);
 }
 
-IOStatus PosixMmapFile::AFsync(const IOOptions& opts, IODebugContext* dbg, void** uq, uring_type queue_type){
+IOStatus PosixMmapFile::AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr){
   return Fsync(opts, dbg);
 }
-IOStatus PosixMmapFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq)
+IOStatus PosixMmapFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
 {
   return IOStatus::OK();
 }
@@ -1599,17 +1650,16 @@ IOStatus PosixWritableFile::Fsync(const IOOptions& /*opts*/,
 
 // Lei modified: this is for normal writable file
 IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
-                                  IODebugContext* /*dbg*/, void ** uq, uring_type queue_type){
+                                  IODebugContext* /*dbg*/, struct uring_queue* uptr){
   
   
-  struct uring_queue* uq_t = urings.get_empty_element(queue_type);
-  *uq = static_cast<void*> (uq_t);
-  if(uq_t == nullptr)
+  if(uptr == nullptr)
   {
     printf("No more uq_t available for fsync !\n");
   }
-  struct io_uring *uptr = &uq_t->uring;
-  struct io_uring_sqe* sqe = io_uring_get_sqe(uptr);
+  struct io_uring *uq = &uptr->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  uptr->count += 1;
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
@@ -1621,29 +1671,26 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;
 
-  int ret = io_uring_submit(uptr);
+  int ret = io_uring_submit(uq);
   if(ret <= 0)
   {
     printf("Submition failed of fsync !\n");
   }
 
-  printf("ASync: fd:%d, uq: %p\n", fd_, &uq_t);
+  //printf("ASync: fd:%d, uq: %p\n", fd_, uptr);
   return IOStatus::OK();
 }
 
 // zl: AFsync: Each time add a new function should change many classes... 
 IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
-                                  IODebugContext* /*dbg*/, void ** uq, uring_type queue_type)
+                                  IODebugContext* /*dbg*/, struct uring_queue* uptr)
 {
-
-  struct uring_queue* uq_t = urings.get_empty_element(queue_type);
-  *uq = static_cast<void*>(uq_t);
-  if(uq_t == nullptr)
+  if(uptr == nullptr)
   {
     printf("No more uq_t available for fsync !\n");
   }
-  struct io_uring *uptr = &uq_t->uring;
-  struct io_uring_sqe* sqe = io_uring_get_sqe(uptr);
+  struct io_uring *uq = &uptr->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
@@ -1655,19 +1702,18 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;
 
-  int ret = io_uring_submit(uptr);
+  int ret = io_uring_submit(uq);
   if(ret <= 0)
   {
     printf("Submition failed of fsync !\n");
   }
-  printf("AFSync: fd:%d, uq: %p\n", fd_, uq_t);
+  //printf("AFSync: fd:%d, uq: %p\n", fd_, uptr);
   return IOStatus::OK();
 }
 
-IOStatus PosixWritableFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, void** uq)
+IOStatus PosixWritableFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
 {
-  struct uring_queue* uq_t = static_cast<struct uring_queue*>(*uq);
-  urings.wait_for_queue(uq_t);
+  urings.wait_for_queue(uptr);
   // printf("WaitASync: uq: %p\n", uq_t);
   return IOStatus::OK();
 }

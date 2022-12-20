@@ -262,9 +262,9 @@ class WritableFileWriter {
   IOStatus Sync(bool use_fsync);
 
   // Lei modified: Async declare
-  IOStatus ASync(bool use_fsync, void** uq, uring_type queue_type);
+  IOStatus ASync(bool use_fsync, struct uring_queue* uptr);
 
-  IOStatus WaitASync(void** uq);
+  IOStatus WaitASync(struct uring_queue* uptr);
 
   // Sync only the data that was already Flush()ed. Safe to call concurrently
   // with Append() and Flush(). If !writable_file_->IsSyncThreadSafe(),
@@ -338,6 +338,6 @@ class WritableFileWriter {
   IOStatus RangeSync(uint64_t offset, uint64_t nbytes);
   IOStatus SyncInternal(bool use_fsync);
   // Lei modified: ASyncInternal declare
-  IOStatus ASyncInternal(bool use_fsync, void** uq, uring_type queue_type);
+  IOStatus ASyncInternal(bool use_fsync, struct uring_queue* uptr);
 };
 }  // namespace ROCKSDB_NAMESPACE

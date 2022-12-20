@@ -22,6 +22,7 @@
 #include "util/crc32c.h"
 #include "util/random.h"
 #include "util/rate_limiter.h"
+#include "env/io_posix.h"
 #include "rocksdb/file_system.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -476,7 +477,7 @@ IOStatus WritableFileWriter::Sync(bool use_fsync) {
 }
 
 // Lei modified: ASync in WritableFileWriter
-IOStatus WritableFileWriter::ASync(bool use_fsync, void** uq, uring_type queue_type) {
+IOStatus WritableFileWriter::ASync(bool use_fsync, struct uring_queue* uptr) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
@@ -488,7 +489,7 @@ IOStatus WritableFileWriter::ASync(bool use_fsync, void** uq, uring_type queue_t
   }
   TEST_KILL_RANDOM("WritableFileWriter::Sync:0");
   if (!use_direct_io() && pending_sync_) {
-    s = ASyncInternal(use_fsync, uq, queue_type);
+    s = ASyncInternal(use_fsync, uptr);
     if (!s.ok()) {
       set_seen_error();
       return s;
@@ -561,15 +562,15 @@ IOStatus WritableFileWriter::SyncInternal(bool use_fsync) {
   // The caller will be responsible to call set_seen_error() if s is not OK.
   return s;
 }
-IOStatus WritableFileWriter::WaitASync(void** uq)
+IOStatus WritableFileWriter::WaitASync(struct uring_queue* uptr)
 {
   IOOptions io_options;
   //io_options.rate_limiter_priority = writable_file_->GetIOPriority();
-  IOStatus s = writable_file_->WaitASync(io_options, nullptr, uq);
+  IOStatus s = writable_file_->WaitASync(io_options, nullptr, uptr);
   return s;
 }
 // Lei modified: ASyncInternal in WritableFileWriter
-IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, void** uq, uring_type queue_type) {
+IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* uptr) {
   // Caller is supposed to check seen_error_
   IOStatus s;
   IOSTATS_TIMER_GUARD(fsync_nanos);
@@ -604,7 +605,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, void** uq, uring_type
   {
     if(urings.init)
     {
-      s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
+      s = writable_file_->AFsync(io_options, nullptr, uptr);
     }
     else
     {
@@ -616,7 +617,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, void** uq, uring_type
     if(urings.init)
     {
       //huyp:modify bug
-      s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
+      s = writable_file_->AFsync(io_options, nullptr, uptr);
     }
     else
     {

@@ -56,8 +56,11 @@
 #include "table/unique_id_impl.h"
 #include "test_util/sync_point.h"
 #include "util/stop_watch.h"
+#include "env/io_posix.h"
 
 namespace ROCKSDB_NAMESPACE {
+
+extern Urings urings;
 
 const char* GetCompactionReasonString(CompactionReason compaction_reason) {
   switch (compaction_reason) {
@@ -619,6 +622,13 @@ Status CompactionJob::Run() {
   LogCompaction();
 
   const size_t num_threads = compact_->sub_compact_states.size();
+  // 
+  struct uring_queue* uptr = urings.get_empty_element(job_id_);
+  Compaction* compaction = compact_->compaction;
+  compaction->uptr = uptr;
+  uptr->data = static_cast<void*>(compaction->input_version());
+  compaction->input_version()->Ref();  
+  //compact_->uptr = 
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();
 
@@ -1719,7 +1729,7 @@ Status CompactionJob::InstallCompactionResults(
                                  start_level, compaction->num_input_files(0)));
     }
   }
-
+  //
   return versions_->LogAndApply(compaction->column_family_data(),
                                 mutable_cf_options, edit, db_mutex_,
                                 db_directory_);

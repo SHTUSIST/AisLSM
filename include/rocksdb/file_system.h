@@ -1041,11 +1041,10 @@ class FSWritableFile {
                         IODebugContext* dbg) = 0;  // sync data
   // Lei modified: virtual ASync
   virtual IOStatus ASync(const IOOptions& options,
-                        IODebugContext* dbg, void ** uq, 
-                        uring_type queue_type) {
+                        IODebugContext* dbg, struct uring_queue* uptr) {
                           return Sync(options, dbg);
                         }
-  virtual IOStatus WaitASync(const IOOptions& options, IODebugContext* dbg, void** uq){
+  virtual IOStatus WaitASync(const IOOptions& options, IODebugContext* dbg, struct uring_queue* uptr){
     return IOStatus::OK();
   }
   /*
@@ -1059,7 +1058,7 @@ class FSWritableFile {
   }
 
   // Lei modified: virtual AFsync
-  virtual IOStatus AFsync(const IOOptions& options, IODebugContext* dbg, void** uq, uring_type queue_type){ //
+  virtual IOStatus AFsync(const IOOptions& options, IODebugContext* dbg, struct uring_queue* uptr){ //
     // Huyp: Just avoid undefined reference to `vtable
     return Fsync(options, dbg);
   }
