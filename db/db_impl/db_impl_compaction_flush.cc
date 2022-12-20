@@ -3326,6 +3326,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       if (c->level(l) == c->output_level()) {
         continue;
       }
+      //zl modified: addfile
       for (size_t i = 0; i < c->num_input_files(l); i++) {
         FileMetaData* f = c->input(l, i);
         c->edit()->DeleteFile(c->level(l), f->fd.GetNumber());
@@ -3335,7 +3336,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
             f->fd.largest_seqno, f->marked_for_compaction, f->temperature,
             f->oldest_blob_file_number, f->oldest_ancester_time,
             f->file_creation_time, f->file_checksum, f->file_checksum_func_name,
-            f->unique_id);
+            f->unique_id, f->uptr);
 
         ROCKS_LOG_BUFFER(
             log_buffer,

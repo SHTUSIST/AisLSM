@@ -116,31 +116,29 @@ struct uring_queue* Urings::get_empty_element(int id)
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    struct io_uring_cqe* cqe = nullptr;
-    while(uptr->count > 0)
-    {
-      if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
-      {
-        io_uring_cqe_seen(&uptr->uring, cqe);
-        /* need to deal with data, not sure how to do it... */
-      }
-      uptr->count -= 1;
-    }
-    if(uptr->count == 0)
-    {
-      /* version unref() */
-      /* break a point at unref to see whether this works... */
-      //printf("filemetadata\n");
-      Version* v = static_cast<Version*>(uptr->data);
-      v->Unref();
-      uptr->data = nullptr;
-      uptr->running.store(false);
-    }
-    else
-    {
-      index += 1;
-      index %= this->compaction_queue_size;
-    }
+    // if(uptr->count > 0)
+    // {
+    //   struct io_uring_cqe* cqe = nullptr;
+    //   while(uptr->count > 0)
+    //   {
+    //     if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
+    //     {
+    //       io_uring_cqe_seen(&uptr->uring, cqe);
+    //     }
+    //     uptr->count -= 1;
+    //   }
+    //   if(uptr->count == 0)
+    //   {
+    //     /* version unref() */
+    //     /* break a point at unref to see whether this works... */
+    //     //printf("filemetadata\n");
+    //     static_cast<Version*>(uptr->data)->Unref();
+    //     uptr->data = nullptr;
+    //   }
+    // }
+    index += 1;
+    index %= this->compaction_queue_size;
+    uptr = this->compaction_urings[index];
   }
   uptr->running.store(true);
   return uptr;
@@ -227,11 +225,15 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
       printf("invalid io_uring_wait_cqe\n");
       return nullptr;
     }
-    while(uptr->count-- > 0)
-      io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
+    for(uint8_t i = 0; i < uptr->count; ++i)
+      io_uring_cqe_seen(&uptr->uring, cqe[i]);
+    uptr->count = 0;
+    static_cast<Version*>(uptr->data)->Unref();
+    uptr->data = nullptr;
   }
-  uptr->data = nullptr;
-  uptr->running.store(false);
+  uptr->ref -= 1;
+  if(uptr->ref == 0)
+    uptr->running.store(false);
   return uptr;
 }
 
@@ -250,8 +252,8 @@ struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
     }
     while(uptr->count-- > 0)
       io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
+    uptr->data = nullptr;
   }
-  uptr->data = nullptr;
   uptr->running.store(false);
   return uptr;
 }
@@ -1660,6 +1662,7 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   uptr->count += 1;
+  uptr->ref += 1;
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
@@ -1690,6 +1693,8 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
     printf("No more uq_t available for fsync !\n");
   }
   struct io_uring *uq = &uptr->uring;
+  uptr->count += 1;
+  uptr->ref += 1;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   if(sqe == nullptr)
   {

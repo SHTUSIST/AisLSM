@@ -17,6 +17,7 @@
 #include "test_util/sync_point.h"
 #include "util/coding.h"
 #include "util/string_util.h"
+#include "env/io_posix.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -58,7 +59,28 @@ Status FileMetaData::UpdateBoundaries(const Slice& key, const Slice& value,
 
   return Status::OK();
 }
-
+void VersionEdit::AddFile(int level, uint64_t file, uint32_t file_path_id,
+               uint64_t file_size, const InternalKey& smallest,
+               const InternalKey& largest, const SequenceNumber& smallest_seqno,
+               const SequenceNumber& largest_seqno, bool marked_for_compaction,
+               Temperature temperature, uint64_t oldest_blob_file_number,
+               uint64_t oldest_ancester_time, uint64_t file_creation_time,
+               const std::string& file_checksum,
+               const std::string& file_checksum_func_name,
+               const UniqueId64x2& unique_id,
+               struct uring_queue* uptr) {
+    assert(smallest_seqno <= largest_seqno);
+    new_files_.emplace_back(
+        level,
+        FileMetaData(file, file_path_id, file_size, smallest, largest,
+                     smallest_seqno, largest_seqno, marked_for_compaction,
+                     temperature, oldest_blob_file_number, oldest_ancester_time,
+                     file_creation_time, file_checksum, file_checksum_func_name,
+                     unique_id, uptr));
+    if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
+      SetLastSequence(largest_seqno);
+    }
+  }
 void VersionEdit::Clear() {
   max_level_ = 0;
   db_id_.clear();

@@ -25,6 +25,7 @@
 #include "table/table_reader.h"
 #include "table/unique_id_impl.h"
 #include "util/autovector.h"
+#include "env/io_posix.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -218,7 +219,8 @@ struct FileMetaData {
 
   // SST unique id
   UniqueId64x2 unique_id{};
-
+  struct uring_queue* uptr = nullptr;
+ 
   FileMetaData() = default;
 
   FileMetaData(uint64_t file, uint32_t file_path_id, uint64_t file_size,
@@ -229,7 +231,8 @@ struct FileMetaData {
                uint64_t _oldest_ancester_time, uint64_t _file_creation_time,
                const std::string& _file_checksum,
                const std::string& _file_checksum_func_name,
-               UniqueId64x2 _unique_id)
+               UniqueId64x2 _unique_id,
+               struct uring_queue* uq = nullptr)
       : fd(file, file_path_id, file_size, smallest_seq, largest_seq),
         smallest(smallest_key),
         largest(largest_key),
@@ -240,7 +243,8 @@ struct FileMetaData {
         file_creation_time(_file_creation_time),
         file_checksum(_file_checksum),
         file_checksum_func_name(_file_checksum_func_name),
-        unique_id(std::move(_unique_id)) {
+        unique_id(std::move(_unique_id)),
+        uptr(uq) {
     TEST_SYNC_POINT_CALLBACK("FileMetaData::FileMetaData", this);
   }
 
@@ -422,19 +426,8 @@ class VersionEdit {
                uint64_t oldest_ancester_time, uint64_t file_creation_time,
                const std::string& file_checksum,
                const std::string& file_checksum_func_name,
-               const UniqueId64x2& unique_id) {
-    assert(smallest_seqno <= largest_seqno);
-    new_files_.emplace_back(
-        level,
-        FileMetaData(file, file_path_id, file_size, smallest, largest,
-                     smallest_seqno, largest_seqno, marked_for_compaction,
-                     temperature, oldest_blob_file_number, oldest_ancester_time,
-                     file_creation_time, file_checksum, file_checksum_func_name,
-                     unique_id));
-    if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
-      SetLastSequence(largest_seqno);
-    }
-  }
+               const UniqueId64x2& unique_id,
+               struct uring_queue* uptr = nullptr);
 
   void AddFile(int level, const FileMetaData& f) {
     assert(f.fd.smallest_seqno <= f.fd.largest_seqno);

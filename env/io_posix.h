@@ -62,6 +62,7 @@ struct uring_queue{
   void* data = nullptr;
   std::atomic<bool> running;
   uint8_t count = 0;
+  uint8_t ref = 0;
   uint16_t id;
 };
 enum uring_type;

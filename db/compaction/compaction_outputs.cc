@@ -58,12 +58,13 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
                                             Statistics* statistics,
                                             bool use_fsync) {
   IOStatus io_s;
-  void* uq;
+  struct uring_queue* uptr = const_cast<struct uring_queue*>(this->compaction_->uptr);
+
   if (input_status.ok()) {
     StopWatch sw(clock, statistics, COMPACTION_OUTFILE_SYNC_MICROS);
     //Lei modified: Here subcompaction sync and output.
     //printf("ASync: Compaction\n");
-    struct uring_queue* uptr = const_cast<struct uring_queue*>(this->compaction_->uptr);
+    // zl modified: 
     io_s = file_writer_->ASync(use_fsync, uptr);
     //io_s = file_writer_->Sync(use_fsync);
   }
@@ -73,6 +74,8 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
 
   if (input_status.ok() && io_s.ok()) {
     FileMetaData* meta = GetMetaData(); 
+    // zl modified: 
+    meta->uptr = uptr;
     //Lei modified: Add uq.
     // printf("ASync: meta number %ld\n", meta->fd.GetNumber());
     meta->file_checksum = file_writer_->GetFileChecksum();

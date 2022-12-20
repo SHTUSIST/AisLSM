@@ -622,7 +622,7 @@ Status CompactionJob::Run() {
   LogCompaction();
 
   const size_t num_threads = compact_->sub_compact_states.size();
-  // 
+  // zl modified: uptr->data
   struct uring_queue* uptr = urings.get_empty_element(job_id_);
   Compaction* compaction = compact_->compaction;
   compaction->uptr = uptr;
@@ -1539,6 +1539,17 @@ Status CompactionJob::FinishCompactionOutputFile(
           meta->oldest_ancester_time = refined_oldest_ancester_time;
         }
       }
+    }
+  }
+  // zl modified: compaction wait: 
+  for (size_t i = 0; i < sub_compact->compaction->num_input_levels(); i++){
+    for (size_t j = 0; j < sub_compact->compaction->num_input_files(i); j++){
+      FileMetaData* fp = sub_compact->compaction->input(i,j);
+      if(fp->uptr != nullptr){
+        // waitasync: 
+        outputs.GetFileWriter()->WaitASync(fp->uptr);
+      }
+      fp->uptr = nullptr;
     }
   }
 
