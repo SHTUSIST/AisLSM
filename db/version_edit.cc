@@ -68,6 +68,7 @@ void VersionEdit::AddFile(int level, uint64_t file, uint32_t file_path_id,
                const std::string& file_checksum,
                const std::string& file_checksum_func_name,
                const UniqueId64x2& unique_id,
+               uint32_t job_id, 
                struct uring_queue* uptr) {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
@@ -76,7 +77,7 @@ void VersionEdit::AddFile(int level, uint64_t file, uint32_t file_path_id,
                      smallest_seqno, largest_seqno, marked_for_compaction,
                      temperature, oldest_blob_file_number, oldest_ancester_time,
                      file_creation_time, file_checksum, file_checksum_func_name,
-                     unique_id, uptr));
+                     unique_id, job_id, uptr));
     if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
       SetLastSequence(largest_seqno);
     }

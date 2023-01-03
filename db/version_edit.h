@@ -219,6 +219,8 @@ struct FileMetaData {
 
   // SST unique id
   UniqueId64x2 unique_id{};
+
+  uint32_t job_id; 
   struct uring_queue* uptr = nullptr;
  
   FileMetaData() = default;
@@ -232,6 +234,7 @@ struct FileMetaData {
                const std::string& _file_checksum,
                const std::string& _file_checksum_func_name,
                UniqueId64x2 _unique_id,
+               uint32_t job_id_ = 0,
                struct uring_queue* uq = nullptr)
       : fd(file, file_path_id, file_size, smallest_seq, largest_seq),
         smallest(smallest_key),
@@ -244,6 +247,7 @@ struct FileMetaData {
         file_checksum(_file_checksum),
         file_checksum_func_name(_file_checksum_func_name),
         unique_id(std::move(_unique_id)),
+        job_id(job_id_),
         uptr(uq) {
     TEST_SYNC_POINT_CALLBACK("FileMetaData::FileMetaData", this);
   }
@@ -426,7 +430,7 @@ class VersionEdit {
                uint64_t oldest_ancester_time, uint64_t file_creation_time,
                const std::string& file_checksum,
                const std::string& file_checksum_func_name,
-               const UniqueId64x2& unique_id,
+               const UniqueId64x2& unique_id, uint32_t job_id = 0,
                struct uring_queue* uptr = nullptr);
 
   void AddFile(int level, const FileMetaData& f) {

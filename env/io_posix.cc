@@ -110,37 +110,18 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     this->init = true;
     return true;
 }
-struct uring_queue* Urings::get_empty_element(int id)
+struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
   uint8_t index = id % this->compaction_queue_size;
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    // if(uptr->count > 0)
-    // {
-    //   struct io_uring_cqe* cqe = nullptr;
-    //   while(uptr->count > 0)
-    //   {
-    //     if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
-    //     {
-    //       io_uring_cqe_seen(&uptr->uring, cqe);
-    //     }
-    //     uptr->count -= 1;
-    //   }
-    //   if(uptr->count == 0)
-    //   {
-    //     /* version unref() */
-    //     /* break a point at unref to see whether this works... */
-    //     //printf("filemetadata\n");
-    //     static_cast<Version*>(uptr->data)->Unref();
-    //     uptr->data = nullptr;
-    //   }
-    // }
     index += 1;
     index %= this->compaction_queue_size;
     uptr = this->compaction_urings[index];
   }
   uptr->running.store(true);
+  uptr->job_id = id;
   return uptr;
 }
 
@@ -231,9 +212,7 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
   }
-  uptr->ref -= 1;
-  if(uptr->ref == 0)
-    uptr->running.store(false);
+  uptr->running.store(false);
   return uptr;
 }
 
@@ -1662,7 +1641,6 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   uptr->count += 1;
-  uptr->ref += 1;
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
@@ -1694,7 +1672,6 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
   }
   struct io_uring *uq = &uptr->uring;
   uptr->count += 1;
-  uptr->ref += 1;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   if(sqe == nullptr)
   {

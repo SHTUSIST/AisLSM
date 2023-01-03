@@ -63,6 +63,7 @@ struct uring_queue{
   std::atomic<bool> running;
   uint8_t count = 0;
   uint8_t ref = 0;
+  uint32_t job_id;
   uint16_t id;
 };
 enum uring_type;
@@ -80,10 +81,9 @@ class Urings{
     init = false;
     printf("clear!\n");
   }
-    struct uring_queue* get_empty_element(int id);
-    //struct uring_queue* get_empty_element(int id); //id is job id.
+    struct uring_queue* get_empty_element(uint32_t id);
     struct uring_queue* wait_for_queue(struct uring_queue* uptr);
-    bool init_queues(uint16_t compaction_num = 100, uint8_t log_num = 100, uint16_t compaction_depth = 1, uint8_t log_depth = 1);
+    bool init_queues(uint16_t compaction_num = 512, uint8_t log_num = 1, uint16_t compaction_depth = 32, uint8_t log_depth = 1);
     bool init = false;
   private: 
     void clear_all(uring_type queue_type);

@@ -1545,7 +1545,8 @@ Status CompactionJob::FinishCompactionOutputFile(
   for (size_t i = 0; i < sub_compact->compaction->num_input_levels(); i++){
     for (size_t j = 0; j < sub_compact->compaction->num_input_files(i); j++){
       FileMetaData* fp = sub_compact->compaction->input(i,j);
-      if(fp->uptr != nullptr){
+      
+      if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
         // waitasync: 
         outputs.GetFileWriter()->WaitASync(fp->uptr);
       }

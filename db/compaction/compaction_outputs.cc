@@ -76,6 +76,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
     FileMetaData* meta = GetMetaData(); 
     // zl modified: 
     meta->uptr = uptr;
+    meta->job_id = uptr->job_id;
     //Lei modified: Add uq.
     // printf("ASync: meta number %ld\n", meta->fd.GetNumber());
     meta->file_checksum = file_writer_->GetFileChecksum();
