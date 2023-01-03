@@ -114,11 +114,12 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
   uint8_t index = id % this->compaction_queue_size;
   struct uring_queue* uptr = this->compaction_urings[index];
-  while(uptr->running)
+  if(uptr->running)
   {
-    index += 1;
+    this->wait_for_queue(uptr);
+    /*index += 1;
     index %= this->compaction_queue_size;
-    uptr = this->compaction_urings[index];
+    uptr = this->compaction_urings[index];*/
   }
   uptr->running.store(true);
   uptr->job_id = id;
