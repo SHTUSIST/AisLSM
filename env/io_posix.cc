@@ -61,11 +61,9 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   this->log_queue_size = log_num;
   this->compaction_queue_depth = compaction_depth;
   this->log_queue_depth = log_depth;
-  if(compaction_num > 0)
-    this->compaction_urings = new struct uring_queue* [compaction_num];
-  if(log_num > 0)
-    this->log_urings = new struct uring_queue* [log_num]; 
-  for(uint8_t i = 0; i < compaction_num; ++i)
+  this->compaction_urings = new struct uring_queue* [compaction_num];
+  this->log_urings = new struct uring_queue* [log_num]; 
+  for(uint16_t i = 0; i < compaction_num; ++i)
     {
       struct uring_queue* qptr;
       qptr = new struct uring_queue();
@@ -112,14 +110,19 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
 }
 struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
-  uint8_t index = id % this->compaction_queue_size;
+  uint16_t index = id % this->compaction_queue_size;
+  uint16_t counter_for_while = 0;
   struct uring_queue* uptr = this->compaction_urings[index];
-  if(uptr->running)
+  while(uptr->running)
   {
-    this->wait_for_queue(uptr);
-    /*index += 1;
-    index %= this->compaction_queue_size;
-    uptr = this->compaction_urings[index];*/
+    counter_for_while += 1;
+    if (counter_for_while>32)
+    {
+      this->wait_for_queue(uptr);
+      break;
+    }
+    index = (id+counter_for_while) %(this->compaction_queue_size);
+    uptr = this->compaction_urings[index];
   }
   uptr->running.store(true);
   uptr->job_id = id;

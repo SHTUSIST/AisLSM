@@ -51,11 +51,6 @@
 namespace ROCKSDB_NAMESPACE {
 /* Need to find the initial point. */
 
-/* The maximum queue size */
-#define MAX_QUEUE_SIZE 100
-
-/* The min queue size, if no queue is available, wait for MIN_QUEUE_SIZE */
-#define MIN_QUEUE_SIZE 5
 // The struct pass to io_uring_set_data.
 struct uring_queue{
   struct io_uring uring;
