@@ -110,17 +110,17 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
 }
 struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
-  uint16_t index = id % this->compaction_queue_size;
-  uint16_t counter_for_while = 0;
+  uint32_t index = 0;
+  uint32_t counter_for_while = 0;
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    counter_for_while += 1;
-    if (counter_for_while>32)
+    if (counter_for_while>64)
     {
       this->wait_for_queue(uptr);
       break;
     }
+    counter_for_while += 1;
     index = (id+counter_for_while) %(this->compaction_queue_size);
     uptr = this->compaction_urings[index];
   }
@@ -161,38 +161,7 @@ void Urings::clear_all(uring_type queue_type)
       break;
   }
 }
-struct uring_queue* Urings::get_empty_element_for_compaction()
-{
-  struct uring_queue* uptr = this->compaction_urings[this->compaction_counter];
-  while(uptr->running)
-  {
-    struct io_uring_cqe* cqe = nullptr;
-    while(uptr->count > 0)
-    {
-      if(io_uring_peek_cqe(&(uptr->uring), &cqe) == 0)
-      {
-        io_uring_cqe_seen(&uptr->uring, cqe);
-        /* need to deal with data, not sure how to do it... */
-      }
-      uptr->count -= 1;
-    }
-    if(uptr->count == 0)
-    {
-      /* version unref() */
-      /* break a point at unref to see whether this works... */
-      printf("filematadata\n");
-      uptr->data = nullptr;
-      uptr->running.store(false);
-    }
-    else
-    {
-      this->compaction_counter += 1;
-      this->compaction_counter %= this->compaction_queue_size;
-    }
-  }
-  uptr->running.store(true);
-  return uptr;
-}
+
 
 
 /* Wait for count times, data will reset to nullptr, need to store it before. */
