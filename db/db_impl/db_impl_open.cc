@@ -1645,7 +1645,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   if(LIBURING_USE && !urings.init)
   {
     /* Init all queues */
-    urings.init_queues(512,1,64,1);
+    urings.init_queues(256,1,24,12);
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {

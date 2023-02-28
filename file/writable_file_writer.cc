@@ -46,7 +46,7 @@ IOStatus WritableFileWriter::Create(const std::shared_ptr<FileSystem>& fs,
 }
 
 IOStatus WritableFileWriter::Append(const Slice& data, uint32_t crc32c_checksum,
-                                    Env::IOPriority op_rate_limiter_priority) {
+                                    Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
@@ -361,7 +361,11 @@ IOStatus WritableFileWriter::Flush(Env::IOPriority op_rate_limiter_priority) {
         s = WriteBufferedWithChecksum(buf_.BufferStart(), buf_.CurrentSize(),
                                       op_rate_limiter_priority);
       } else {
-        s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
+        if(urings.init)
+          s = AWriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
+                          op_rate_limiter_priority, nullptr);
+        else
+          s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
                           op_rate_limiter_priority);
       }
     }
@@ -777,8 +781,106 @@ IOStatus WritableFileWriter::WriteBuffered(
   return s;
 }
 
+IOStatus WritableFileWriter::AWriteBuffered(
+    const char* data, size_t size, Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr) {
+  if (seen_error()) {
+    return AssertFalseAndGetStatusForPrevError();
+  }
+
+  IOStatus s;
+  assert(!use_direct_io());
+  const char* src = data;
+  size_t left = size;
+  DataVerificationInfo v_info;
+  char checksum_buf[sizeof(uint32_t)];
+  Env::IOPriority rate_limiter_priority_used =
+      WritableFileWriter::DecideRateLimiterPriority(
+          writable_file_->GetIOPriority(), op_rate_limiter_priority);
+  IOOptions io_options;
+  io_options.rate_limiter_priority = rate_limiter_priority_used;
+
+  while (left > 0) {
+    size_t allowed = left;
+    if (rate_limiter_ != nullptr &&
+        rate_limiter_priority_used != Env::IO_TOTAL) {
+      allowed = rate_limiter_->RequestToken(left, 0 /* alignment */,
+                                            rate_limiter_priority_used, stats_,
+                                            RateLimiter::OpType::kWrite);
+    }
+
+    {
+      IOSTATS_TIMER_GUARD(write_nanos);
+      TEST_SYNC_POINT("WritableFileWriter::Flush:BeforeAppend");
+
+#ifndef ROCKSDB_LITE
+      FileOperationInfo::StartTimePoint start_ts;
+      uint64_t old_size = writable_file_->GetFileSize(io_options, nullptr);
+      if (ShouldNotifyListeners()) {
+        start_ts = FileOperationInfo::StartNow();
+        old_size = next_write_offset_;
+      }
+#endif
+      {
+        auto prev_perf_level = GetPerfLevel();
+
+        IOSTATS_CPU_TIMER_GUARD(cpu_write_nanos, clock_);
+        if (perform_data_verification_) {
+          Crc32cHandoffChecksumCalculation(src, allowed, checksum_buf);
+          v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+          s = writable_file_->AAppend(Slice(src, allowed), io_options, v_info,
+                                     nullptr, uptr);
+        } else {
+          s = writable_file_->AAppend(Slice(src, allowed), io_options, nullptr, uptr);
+        }
+        if (!s.ok()) {
+          // If writable_file_->Append() failed, then the data may or may not
+          // exist in the underlying memory buffer, OS page cache, remote file
+          // system's buffer, etc. If WritableFileWriter keeps the data in
+          // buf_, then a future Close() or write retry may send the data to
+          // the underlying file again. If the data does exist in the
+          // underlying buffer and gets written to the file eventually despite
+          // returning error, the file may end up with two duplicate pieces of
+          // data. Therefore, clear the buf_ at the WritableFileWriter layer
+          // and let caller determine error handling.
+          buf_.Size(0);
+          buffered_data_crc32c_checksum_ = 0;
+        }
+        SetPerfLevel(prev_perf_level);
+      }
+#ifndef ROCKSDB_LITE
+      if (ShouldNotifyListeners()) {
+        auto finish_ts = std::chrono::steady_clock::now();
+        NotifyOnFileWriteFinish(old_size, allowed, start_ts, finish_ts, s);
+        if (!s.ok()) {
+          NotifyOnIOError(s, FileOperationType::kAppend, file_name(), allowed,
+                          old_size);
+        }
+      }
+#endif
+      if (!s.ok()) {
+        set_seen_error();
+        return s;
+      }
+    }
+
+    IOSTATS_ADD(bytes_written, allowed);
+    TEST_KILL_RANDOM("WritableFileWriter::WriteBuffered:0");
+
+    left -= allowed;
+    src += allowed;
+    uint64_t cur_size = flushed_size_.load(std::memory_order_acquire);
+    flushed_size_.store(cur_size + allowed, std::memory_order_release);
+  }
+  buf_.Size(0);
+  buffered_data_crc32c_checksum_ = 0;
+  if (!s.ok()) {
+    set_seen_error();
+  }
+  return s;
+}
+
 IOStatus WritableFileWriter::WriteBufferedWithChecksum(
-    const char* data, size_t size, Env::IOPriority op_rate_limiter_priority) {
+    const char* data, size_t size, Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }

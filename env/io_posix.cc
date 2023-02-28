@@ -64,49 +64,49 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   this->compaction_urings = new struct uring_queue* [compaction_num];
   this->log_urings = new struct uring_queue* [log_num]; 
   for(uint16_t i = 0; i < compaction_num; ++i)
+  {
+    struct uring_queue* qptr;
+    qptr = new struct uring_queue();
+    qptr->data = nullptr;
+    qptr->running = false;
+    qptr->id = i;
+    qptr->count = 0;
+    if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
     {
-      struct uring_queue* qptr;
-      qptr = new struct uring_queue();
-      qptr->data = nullptr;
-      qptr->running = false;
-      qptr->id = i;
-      qptr->count = 0;
-      if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
-      {
-        init_lib = false;
-        break;
-      }
-      compaction_urings[i] = qptr;
-      //compaction_urings->push(std::move(qptr));
+      init_lib = false;
+      break;
     }
-    // Failed to init, then delete all elements.
-    if(!init_lib)
+    compaction_urings[i] = qptr;
+    //compaction_urings->push(std::move(qptr));
+  }
+  // Failed to init, then delete all elements.
+  if(!init_lib)
+  {
+    clear_all(uring_type::uring_compaction_type);
+    return false;
+  }
+  for(uint8_t i = 0; i < log_num; ++i)
+  {
+    struct uring_queue* qptr;
+    qptr = new struct uring_queue();
+    qptr->data = nullptr;
+    qptr->running = false;
+    qptr->count = 0;
+    qptr->id = i;
+    if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
     {
-      clear_all(uring_type::uring_compaction_type);
-      return false;
+      init_lib = false;
+      break;
     }
-    for(uint8_t i = 0; i < log_num; ++i)
-    {
-      struct uring_queue* qptr;
-      qptr = new struct uring_queue();
-      qptr->data = nullptr;
-      qptr->running = false;
-      qptr->count = 0;
-      qptr->id = i;
-      if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
-      {
-        init_lib = false;
-        break;
-      }
-      log_urings[i] = qptr;
-    }
-    if(!init_lib)
-    {
-      clear_all(uring_type::uring_log_type);
-      return false;
-    }
-    this->init = true;
-    return true;
+    log_urings[i] = qptr;
+  }
+  if(!init_lib)
+  {
+    clear_all(uring_type::uring_log_type);
+    return false;
+  }
+  this->init = true;
+  return true;
 }
 struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
@@ -1281,6 +1281,11 @@ PosixMmapFile::~PosixMmapFile() {
   }
 }
 
+IOStatus PosixMmapFile::AAppend(const Slice& data, const IOOptions& opts,
+                               IODebugContext* dbg, struct uring_queue* uptr) {
+  return Append(data, opts, dbg);
+}
+
 IOStatus PosixMmapFile::Append(const Slice& data, const IOOptions& /*opts*/,
                                IODebugContext* /*dbg*/) {
   const char* src = data.data();
@@ -1485,6 +1490,49 @@ IOStatus PosixWritableFile::Append(const Slice& data, const IOOptions& /*opts*/,
   return IOStatus::OK();
 }
 
+IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/,
+                                   IODebugContext* dbg/**/, uring_queue* uptrr) {
+                                     
+  if (use_direct_io()) {
+    assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
+    assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
+  }
+  const char* src = data.data();
+  size_t nbytes = data.size();
+  struct uring_queue* uptr = new struct uring_queue();
+  if(io_uring_queue_init(1, &(uptr->uring), 0) != 0)
+  {
+    printf("init fails\n");
+  }
+  
+  struct io_uring *uq = &uptr->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  if(sqe == nullptr)
+  {
+    printf("No more sqe available for APositionedAppend !\n");
+  }
+
+  io_uring_prep_write(sqe, fd_, src, nbytes, filesize_);
+
+  int ret = io_uring_submit(uq);
+  
+  if(ret <= 0)
+  {
+    printf("Submission failed of AAppend !\n");
+    Append(data, opts, dbg);
+  }
+  else
+  {
+    struct io_uring_cqe* cqe;
+    io_uring_wait_cqe(uq, &cqe);
+    io_uring_cqe_seen(uq, cqe);
+  }
+  io_uring_queue_exit(uq);
+  delete(uptr);
+  filesize_ += nbytes;
+  lseek(fd_, filesize_, SEEK_SET);
+  return IOStatus::OK();
+}
 IOStatus PosixWritableFile::PositionedAppend(const Slice& data, uint64_t offset,
                                              const IOOptions& /*opts*/,
                                              IODebugContext* /*dbg*/) {

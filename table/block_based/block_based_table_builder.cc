@@ -1056,7 +1056,7 @@ void BlockBasedTableBuilder::WriteBlock(BlockBuilder* block,
   }
   WriteBlock(uncompressed_block_data, handle, block_type);
 }
-
+// append?
 void BlockBasedTableBuilder::WriteBlock(const Slice& uncompressed_block_data,
                                         BlockHandle* handle,
                                         BlockType block_type) {
@@ -1242,7 +1242,9 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
   assert(io_status().ok());
 
   {
-    IOStatus io_s = r->file->Append(block_contents);
+    // AAppend
+    printf("Append point1\n");
+    IOStatus io_s = r->file->Append(block_contents, 0, Env::IO_TOTAL, nullptr);
     if (!io_s.ok()) {
       r->SetIOStatus(io_s);
       return;
@@ -1268,6 +1270,8 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
       "BlockBasedTableBuilder::WriteMaybeCompressedBlock:TamperWithChecksum",
       trailer.data());
   {
+    //zl: aappend
+    printf("Append point2\n");
     IOStatus io_s = r->file->Append(Slice(trailer.data(), trailer.size()));
     if (!io_s.ok()) {
       r->SetIOStatus(io_s);
@@ -1800,6 +1804,7 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
   footer.Build(kBlockBasedTableMagicNumber, r->table_options.format_version,
                r->get_offset(), r->table_options.checksum,
                metaindex_block_handle, index_block_handle);
+  printf("Append point3\n");
   IOStatus ios = r->file->Append(footer.GetSlice());
   if (ios.ok()) {
     r->set_offset(r->get_offset() + footer.GetSlice().size());

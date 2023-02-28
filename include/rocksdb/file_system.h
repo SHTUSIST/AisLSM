@@ -981,7 +981,17 @@ class FSWritableFile {
                           IODebugContext* dbg) {
     return Append(data, options, dbg);
   }
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& options,
+                          IODebugContext* dbg, struct uring_queue* uptr)
+  {
+    return Append(data, options, dbg);
+  }
 
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& options,
+                          const DataVerificationInfo& /* verification_info */,
+                          IODebugContext* dbg, struct uring_queue* uptr) {
+    return Append(data, options, dbg);
+  }
   // PositionedAppend data to the specified offset. The new EOF after append
   // must be larger than the previous EOF. This is to be used when writes are
   // not backed by OS buffers and hence has to always start from the start of

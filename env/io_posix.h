@@ -409,6 +409,13 @@ class PosixWritableFile : public FSWritableFile {
                           IODebugContext* dbg) override {
     return Append(data, opts, dbg);
   }
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& opts,
+                          IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& opts,
+                          const DataVerificationInfo& /* verification_info */,
+                          IODebugContext* dbg, struct uring_queue* uptr) override {
+    return Append(data, opts, dbg);
+  }
   virtual IOStatus PositionedAppend(const Slice& data, uint64_t offset,
                                     const IOOptions& opts,
                                     IODebugContext* dbg) override;
@@ -514,6 +521,15 @@ class PosixMmapFile : public FSWritableFile {
                           IODebugContext* dbg) override {
     return Append(data, opts, dbg);
   }
+
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& opts,
+                          IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus AAppend(const Slice& data, const IOOptions& opts,
+                          const DataVerificationInfo& /* verification_info */,
+                          IODebugContext* dbg, struct uring_queue* uptr) override {
+    return Append(data, opts, dbg);
+  }
+
   virtual IOStatus Flush(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Sync(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Fsync(const IOOptions& opts, IODebugContext* dbg) override;
