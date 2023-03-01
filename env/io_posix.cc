@@ -54,7 +54,7 @@ extern Urings urings;
 extern std::atomic<int> uring_counter;
 
 //zl: Add some functions 
-bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint8_t log_depth)
+bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint16_t log_depth)
 {
   int init_lib = true;
   this->compaction_queue_size = compaction_num;
@@ -1499,14 +1499,17 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
   }
   const char* src = data.data();
   size_t nbytes = data.size();
-  struct uring_queue* uptr = new struct uring_queue();
-  if(io_uring_queue_init(1, &(uptr->uring), 0) != 0)
-  {
-    printf("init fails\n");
-  }
+  //huyp init uring
+  // struct uring_queue* uptr = new struct uring_queue();
+  struct uring_queue* uptr = urings.log_urings[0];
+  // if(io_uring_queue_init(1, &(uptr->uring), 0) != 0)
+  // {
+  //   printf("init fails\n");
+  // }
   
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  sqe->flags |= IOSQE_IO_LINK;
   if(sqe == nullptr)
   {
     printf("No more sqe available for APositionedAppend !\n");
@@ -1521,14 +1524,15 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
     printf("Submission failed of AAppend !\n");
     Append(data, opts, dbg);
   }
+  // huyp need to remove
   else
   {
-    struct io_uring_cqe* cqe;
-    io_uring_wait_cqe(uq, &cqe);
-    io_uring_cqe_seen(uq, cqe);
+    // struct io_uring_cqe* cqe;
+    // io_uring_wait_cqe(uq, &cqe);
+    // io_uring_cqe_seen(uq, cqe);
   }
-  io_uring_queue_exit(uq);
-  delete(uptr);
+  // io_uring_queue_exit(uq);
+  // delete(uptr);
   filesize_ += nbytes;
   lseek(fd_, filesize_, SEEK_SET);
   return IOStatus::OK();

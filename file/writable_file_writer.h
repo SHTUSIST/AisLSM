@@ -250,12 +250,23 @@ class WritableFileWriter {
   // When this Append API is called, if the crc32c_checksum is not provided, we
   // will calculate the checksum internally.
   IOStatus Append(const Slice& data, uint32_t crc32c_checksum = 0,
-                  Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL, struct uring_queue* uptr = nullptr);
+                  Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
+
+  // huyp : similar to append function before but aimed to use asynchronus write to accomplish sstable block write
+  IOStatus Awrite_sstblock_append(const Slice& data, uint32_t crc32c_checksum = 0,
+                  Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
+
+   // huyp : similar to append function before but aimed to use asynchronus write to accomplish footer block
+  IOStatus Awrite_footer_append(const Slice& data, uint32_t crc32c_checksum = 0,
+                  Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
 
   IOStatus Pad(const size_t pad_bytes,
                Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
 
   IOStatus Flush(Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
+
+  //huyp : async flush data to os page cache
+  IOStatus AsyncFlush(Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
 
   IOStatus Close();
 
@@ -333,9 +344,13 @@ class WritableFileWriter {
   // Normal write.
   IOStatus WriteBuffered(const char* data, size_t size,
                          Env::IOPriority op_rate_limiter_priority);
+  //huyp: asynchronous write buffer             
   IOStatus AWriteBuffered(const char* data, size_t size,
                          Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr = nullptr);
   IOStatus WriteBufferedWithChecksum(const char* data, size_t size,
+                                     Env::IOPriority op_rate_limiter_priority);
+  //huyp: asynchronous write buffer with checksum                                   
+  IOStatus AsyncWriteBufferedWithChecksum(const char* data, size_t size,
                                      Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr = nullptr);
   IOStatus RangeSync(uint64_t offset, uint64_t nbytes);
   IOStatus SyncInternal(bool use_fsync);
