@@ -1889,7 +1889,7 @@ Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
       sub_compact->compaction->OutputFilePreallocationSize()));
   const auto& listeners =
       sub_compact->compaction->immutable_options()->listeners;
-  // zl: writableFilewriter. Input the uptr. 
+  // zl: writableFilewriter. Input the uptr get when compaction job run.
   outputs.AssignFileWriter(new WritableFileWriter(
       std::move(writable_file), fname, fo_copy, db_options_.clock, io_tracer_,
       db_options_.stats, listeners, db_options_.file_checksum_gen_factory.get(),

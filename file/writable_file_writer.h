@@ -215,6 +215,8 @@ class WritableFileWriter {
     TEST_SYNC_POINT_CALLBACK("WritableFileWriter::WritableFileWriter:0",
                              reinterpret_cast<void*>(max_buffer_size_));
     buf_.Alignment(writable_file_->GetRequiredBufferAlignment());
+    // zl: there should use --writable_file_max_buffer_size=134217728 for rocksdb running 
+    // Reset max_buffer_size_ works
     // max_buffer_size_ = 134217728;
     buf_.AllocateNewBuffer(std::min((size_t)65536, max_buffer_size_));
     // buf_.AllocateNewBuffer(max_buffer_size_);

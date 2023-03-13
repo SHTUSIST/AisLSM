@@ -165,7 +165,6 @@ void Urings::clear_all(uring_type queue_type)
 
 
 /* Wait for count times, data will reset to nullptr, need to store it before. */
-/* May need a uring_type to determine which function should be called.  */
 struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
 {
   if(!uptr->running) return uptr;
@@ -174,6 +173,7 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
     struct io_uring_cqe* cqe;
     for(uint16_t i = 0; i < uptr->count; ++i)
     {
+      // io_uring_wait_cqe_nr is proved to be bad to use.
       int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
       if(ret < 0)
       {
@@ -181,6 +181,8 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
         return nullptr;
       }
       void* data = io_uring_cqe_get_data(cqe);
+
+      // Only free data for aappend. 
       if(data != nullptr)
         free(data);
       io_uring_cqe_seen(&uptr->uring, cqe);
@@ -188,6 +190,7 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
     uptr->count = 0;
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
+    //zl: Close fds.
     while(!uptr->fds.empty())
     {
       close(uptr->fds.back());
@@ -1520,9 +1523,11 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
   }
   uptr->count += 1;
   io_uring_prep_write(sqe, fd_, data_copy, nbytes, filesize_);
+  // Set data after prep.
   io_uring_sqe_set_data(sqe, data_copy);
   
   filesize_ += nbytes;
+  // No need to submit, submit when afsync is called. lseek has no use.
   lseek(fd_, filesize_, SEEK_SET);
   return IOStatus::OK();
 }
@@ -1602,6 +1607,7 @@ IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
 #endif
   }
 
+  // Should not close, close should happens after sync wait.
   /*if (close(fd_) < 0) {
     s = IOError("While closing file after writing", filename_, errno);
   }*/
@@ -1662,7 +1668,8 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
 
   // Lei Todo: this place should act like fdatasync, which means having flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
-  if(uptr->flag)
+  // If want to add flag on footer, should change here.
+  // if(uptr->flag)
     io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
   // Set data can transmit datas
   //io_uring_sqe_set_data(sqe, (void*) uq);
@@ -1696,8 +1703,9 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
 
   // Lei Todo: this place should act like fsync, which means no flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
-  if(uptr->flag)
-    io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+
+  // Record all fds should close afterwards.
   uptr->fds.push_back(fd_);
   // Set data can transmit datas
   //io_uring_sqe_set_data(sqe, (void*) uq);

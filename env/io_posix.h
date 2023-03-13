@@ -57,7 +57,7 @@ struct uring_queue{
   void* data = nullptr;
   std::atomic<bool> running;
   uint16_t count = 0;
-  bool flag = false;
+  // bool flag = false;
   uint32_t job_id;
   uint16_t id;
   std::vector<int> fds;

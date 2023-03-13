@@ -1244,6 +1244,7 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
   {
     // huyp append point: sstable append
     IOStatus io_s;
+    // zl: Flush's uptr is nullptr, compaction's uptr is not.
     if(r->file->uptr_ == nullptr)
       io_s = r->file->Append(block_contents);
     else
@@ -1274,6 +1275,8 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
       trailer.data());
   {
     //zl huyp: append pointer:trailer
+
+    // zl: Flush's uptr is nullptr, compaction's uptr is not.
     IOStatus io_s;
     if(r->file->uptr_ == nullptr)
       io_s = r->file->Append(Slice(trailer.data(), trailer.size()));
@@ -1812,12 +1815,14 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
                metaindex_block_handle, index_block_handle);
   //append point huyp: write footer of sstable
   IOStatus ios;
+  
   if(r->file->uptr_ == nullptr)
     ios = r->file->Append(footer.GetSlice());
   else
   {
     ios = r->file->Awrite_footer_append(footer.GetSlice());
-    r->file->uptr_->flag = true;
+    // If want to add flag on footer, this should have a flag.
+  //  r->file->uptr_->flag = true;
   }
   if (ios.ok()) {
     r->set_offset(r->get_offset() + footer.GetSlice().size());
