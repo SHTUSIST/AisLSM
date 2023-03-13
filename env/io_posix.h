@@ -56,10 +56,11 @@ struct uring_queue{
   struct io_uring uring;
   void* data = nullptr;
   std::atomic<bool> running;
-  uint8_t count = 0;
-  uint8_t ref = 0;
+  uint16_t count = 0;
+  bool flag = false;
   uint32_t job_id;
   uint16_t id;
+  std::vector<int> fds;
 };
 enum uring_type;
 class Urings{

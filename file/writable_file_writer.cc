@@ -346,7 +346,7 @@ IOStatus WritableFileWriter::Awrite_sstblock_append(const Slice& data, uint32_t 
         // huyp: s = WriteBuffered(src, left, op_rate_limiter_priority);
           if (LIKELY(urings.init))
             s = AWriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
-                          op_rate_limiter_priority, nullptr);
+                          op_rate_limiter_priority);
           else
             s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
                           op_rate_limiter_priority);
@@ -494,7 +494,7 @@ IOStatus WritableFileWriter::Awrite_footer_append(const Slice& data, uint32_t cr
         // huyp: s = WriteBuffered(src, left, op_rate_limiter_priority);
           if (LIKELY(urings.init))
             s = AWriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
-                          op_rate_limiter_priority, nullptr);
+                          op_rate_limiter_priority);
           else
             s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
                           op_rate_limiter_priority);
@@ -775,7 +775,7 @@ IOStatus WritableFileWriter::AsyncFlush(Env::IOPriority op_rate_limiter_priority
         // huyp: async write buffer
         if(LIKELY(urings.init))
           s = AWriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
-                          op_rate_limiter_priority, nullptr);
+                          op_rate_limiter_priority);
         else
           s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize(),
                           op_rate_limiter_priority);
@@ -1185,7 +1185,7 @@ IOStatus WritableFileWriter::WriteBuffered(
 }
 
 IOStatus WritableFileWriter::AWriteBuffered(
-    const char* data, size_t size, Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr) {
+    const char* data, size_t size, Env::IOPriority op_rate_limiter_priority) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
@@ -1231,9 +1231,9 @@ IOStatus WritableFileWriter::AWriteBuffered(
           Crc32cHandoffChecksumCalculation(src, allowed, checksum_buf);
           v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
           s = writable_file_->AAppend(Slice(src, allowed), io_options, v_info,
-                                     nullptr, uptr);
+                                     nullptr, this->uptr_);
         } else {
-          s = writable_file_->AAppend(Slice(src, allowed), io_options, nullptr, uptr);
+          s = writable_file_->AAppend(Slice(src, allowed), io_options, nullptr, this->uptr_);
         }
         if (!s.ok()) {
           // If writable_file_->Append() failed, then the data may or may not
@@ -1439,7 +1439,7 @@ IOStatus WritableFileWriter::AsyncWriteBufferedWithChecksum(
       v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
       // huyp: writebufferwithchecksum
       // s = writable_file_->Append(Slice(src, left), io_options, v_info, nullptr);
-      s = writable_file_->AAppend(Slice(src, left), io_options, v_info, nullptr,uptr);
+      s = writable_file_->AAppend(Slice(src, left), io_options, v_info, nullptr, this->uptr_);
       SetPerfLevel(prev_perf_level);
     }
 #ifndef ROCKSDB_LITE

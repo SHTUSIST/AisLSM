@@ -171,19 +171,25 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
   if(!uptr->running) return uptr;
   if(uptr->count > 0)
   {
-    struct io_uring_cqe* cqe[uptr->count];
-    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
-    //if(unlikely(ret < 0))
-    if(ret < 0)
+    struct io_uring_cqe* cqe;
+    for(uint16_t i = 0; i < uptr->count; ++i)
     {
-      printf("invalid io_uring_wait_cqe\n");
-      return nullptr;
+      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+      if(ret < 0)
+      {
+        printf("invalid io_uring_wait_cqe\n");
+        return nullptr;
+      }
+      io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    for(uint8_t i = 0; i < uptr->count; ++i)
-      io_uring_cqe_seen(&uptr->uring, cqe[i]);
     uptr->count = 0;
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
+    while(!uptr->fds.empty())
+    {
+      close(uptr->fds.back());
+      uptr->fds.pop_back();
+    }
   }
   uptr->running.store(false);
   return uptr;
@@ -194,16 +200,17 @@ struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
   if(!uptr->running) return uptr;
   if(uptr->count > 0)
   {
-    struct io_uring_cqe* cqe[uptr->count];
-    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
-    //if(unlikely(ret < 0))
-    if(ret < 0)
+    struct io_uring_cqe* cqe;
+    for(uint16_t i = 0; i < uptr->count; ++i)
     {
-      printf("invalid io_uring_wait_cqe\n");
-      return nullptr;
+      int ret =  io_uring_wait_cqe(&uptr->uring, &cqe);
+      if(ret < 0)
+      {
+        printf("invalid io_uring_wait_cqe\n");
+        return nullptr;
+      }
+      io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    while(uptr->count-- > 0)
-      io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
     uptr->data = nullptr;
   }
   uptr->running.store(false);
@@ -1491,7 +1498,7 @@ IOStatus PosixWritableFile::Append(const Slice& data, const IOOptions& /*opts*/,
 }
 
 IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/,
-                                   IODebugContext* dbg/**/, uring_queue* uptrr) {
+                                   IODebugContext* dbg/**/, uring_queue* uptr) {
                                      
   if (use_direct_io()) {
     assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
@@ -1499,40 +1506,19 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
   }
   const char* src = data.data();
   size_t nbytes = data.size();
-  //huyp init uring
-  // struct uring_queue* uptr = new struct uring_queue();
-  struct uring_queue* uptr = urings.log_urings[0];
-  // if(io_uring_queue_init(1, &(uptr->uring), 0) != 0)
-  // {
-  //   printf("init fails\n");
-  // }
-  
+
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
-  sqe->flags |= IOSQE_IO_LINK;
+  void* data_copy = malloc(nbytes);
+  memcpy(data_copy, src, nbytes);
   if(sqe == nullptr)
   {
     printf("No more sqe available for APositionedAppend !\n");
   }
-
-  io_uring_prep_write(sqe, fd_, src, nbytes, filesize_);
-
-  int ret = io_uring_submit(uq);
+  uptr->count += 1;
+  io_uring_prep_write(sqe, fd_, data_copy, nbytes, filesize_);
+  io_uring_sqe_set_data(sqe, data_copy);
   
-  if(ret <= 0)
-  {
-    printf("Submission failed of AAppend !\n");
-    Append(data, opts, dbg);
-  }
-  // huyp need to remove
-  else
-  {
-    // struct io_uring_cqe* cqe;
-    // io_uring_wait_cqe(uq, &cqe);
-    // io_uring_cqe_seen(uq, cqe);
-  }
-  // io_uring_queue_exit(uq);
-  // delete(uptr);
   filesize_ += nbytes;
   lseek(fd_, filesize_, SEEK_SET);
   return IOStatus::OK();
@@ -1571,7 +1557,7 @@ IOStatus PosixWritableFile::Truncate(uint64_t size, const IOOptions& /*opts*/,
 
 IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/) {
-                                    struct io_uring_cqe* cqe = nullptr;
+  
   IOStatus s;
   //
   size_t block_size;
@@ -1613,9 +1599,9 @@ IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
 #endif
   }
 
-  if (close(fd_) < 0) {
+  /*if (close(fd_) < 0) {
     s = IOError("While closing file after writing", filename_, errno);
-  }
+  }*/
   fd_ = -1;
   return s;
 }
@@ -1673,6 +1659,8 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
 
   // Lei Todo: this place should act like fdatasync, which means having flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  if(uptr->flag)
+    io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
   // Set data can transmit datas
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;
@@ -1682,7 +1670,7 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   {
     printf("Submition failed of fsync !\n");
   }
-
+  uptr->fds.push_back(fd_);
   //printf("ASync: fd:%d, uq: %p\n", fd_, uptr);
   return IOStatus::OK();
 }
@@ -1705,6 +1693,9 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
 
   // Lei Todo: this place should act like fsync, which means no flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  if(uptr->flag)
+    io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+  uptr->fds.push_back(fd_);
   // Set data can transmit datas
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;

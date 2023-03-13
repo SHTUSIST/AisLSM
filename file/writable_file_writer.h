@@ -21,6 +21,7 @@
 #include "rocksdb/rate_limiter.h"
 #include "test_util/sync_point.h"
 #include "util/aligned_buffer.h"
+#include "env/io_posix.h"
 
 namespace ROCKSDB_NAMESPACE {
 class Statistics;
@@ -182,7 +183,8 @@ class WritableFileWriter {
       const std::vector<std::shared_ptr<EventListener>>& listeners = {},
       FileChecksumGenFactory* file_checksum_gen_factory = nullptr,
       bool perform_data_verification = false,
-      bool buffered_data_with_checksum = false)
+      bool buffered_data_with_checksum = false, 
+      struct uring_queue* uptr = nullptr)
       : file_name_(_file_name),
         writable_file_(std::move(file), io_tracer, _file_name),
         clock_(clock),
@@ -204,7 +206,8 @@ class WritableFileWriter {
         checksum_finalized_(false),
         perform_data_verification_(perform_data_verification),
         buffered_data_crc32c_checksum_(0),
-        buffered_data_with_checksum_(buffered_data_with_checksum) {
+        buffered_data_with_checksum_(buffered_data_with_checksum),
+        uptr_(uptr){
 #ifndef ROCKSDB_LITE
     temperature_ = options.temperature;
 #endif  // ROCKSDB_LITE
@@ -212,7 +215,9 @@ class WritableFileWriter {
     TEST_SYNC_POINT_CALLBACK("WritableFileWriter::WritableFileWriter:0",
                              reinterpret_cast<void*>(max_buffer_size_));
     buf_.Alignment(writable_file_->GetRequiredBufferAlignment());
-    buf_.AllocateNewBuffer(std::min((size_t)65536, max_buffer_size_));
+    max_buffer_size_ = 134217728;
+    // buf_.AllocateNewBuffer(std::min((size_t)65536, max_buffer_size_));
+    buf_.AllocateNewBuffer(max_buffer_size_);
 #ifndef ROCKSDB_LITE
     std::for_each(listeners.begin(), listeners.end(),
                   [this](const std::shared_ptr<EventListener>& e) {
@@ -232,6 +237,7 @@ class WritableFileWriter {
     }
   }
 
+  struct uring_queue* uptr_;
   static IOStatus Create(const std::shared_ptr<FileSystem>& fs,
                          const std::string& fname, const FileOptions& file_opts,
                          std::unique_ptr<WritableFileWriter>* writer,
@@ -346,7 +352,7 @@ class WritableFileWriter {
                          Env::IOPriority op_rate_limiter_priority);
   //huyp: asynchronous write buffer             
   IOStatus AWriteBuffered(const char* data, size_t size,
-                         Env::IOPriority op_rate_limiter_priority, struct uring_queue* uptr = nullptr);
+                         Env::IOPriority op_rate_limiter_priority);
   IOStatus WriteBufferedWithChecksum(const char* data, size_t size,
                                      Env::IOPriority op_rate_limiter_priority);
   //huyp: asynchronous write buffer with checksum                                   

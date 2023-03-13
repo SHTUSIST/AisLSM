@@ -1243,7 +1243,11 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
 
   {
     // huyp append point: sstable append
-    IOStatus io_s = r->file->Awrite_sstblock_append(block_contents);
+    IOStatus io_s;
+    if(r->file->uptr_ == nullptr)
+      io_s = r->file->Append(block_contents);
+    else
+      io_s = r->file->Awrite_sstblock_append(block_contents);
     if (!io_s.ok()) {
       r->SetIOStatus(io_s);
       return;
@@ -1270,7 +1274,11 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
       trailer.data());
   {
     //zl huyp: append pointer:trailer
-    IOStatus io_s = r->file->Awrite_sstblock_append(Slice(trailer.data(), trailer.size()));
+    IOStatus io_s;
+    if(r->file->uptr_ == nullptr)
+      io_s = r->file->Append(Slice(trailer.data(), trailer.size()));
+    else 
+      io_s = r->file->Awrite_sstblock_append(Slice(trailer.data(), trailer.size()));
     if (!io_s.ok()) {
       r->SetIOStatus(io_s);
       return;
@@ -1803,12 +1811,21 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
                r->get_offset(), r->table_options.checksum,
                metaindex_block_handle, index_block_handle);
   //append point huyp: write footer of sstable
-  IOStatus ios = r->file->Awrite_footer_append(footer.GetSlice());
+  IOStatus ios;
+  if(r->file->uptr_ == nullptr)
+    ios = r->file->Append(footer.GetSlice());
+  else
+  {
+    ios = r->file->Awrite_footer_append(footer.GetSlice());
+    r->file->uptr_->flag = true;
+  }
   if (ios.ok()) {
     r->set_offset(r->get_offset() + footer.GetSlice().size());
   } else {
     r->SetIOStatus(ios);
   }
+  
+  //zl: set flag true, make sync io_drain.
 }
 
 void BlockBasedTableBuilder::EnterUnbuffered() {
