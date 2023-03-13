@@ -215,9 +215,9 @@ class WritableFileWriter {
     TEST_SYNC_POINT_CALLBACK("WritableFileWriter::WritableFileWriter:0",
                              reinterpret_cast<void*>(max_buffer_size_));
     buf_.Alignment(writable_file_->GetRequiredBufferAlignment());
-    max_buffer_size_ = 134217728;
-    // buf_.AllocateNewBuffer(std::min((size_t)65536, max_buffer_size_));
-    buf_.AllocateNewBuffer(max_buffer_size_);
+    // max_buffer_size_ = 134217728;
+    buf_.AllocateNewBuffer(std::min((size_t)65536, max_buffer_size_));
+    // buf_.AllocateNewBuffer(max_buffer_size_);
 #ifndef ROCKSDB_LITE
     std::for_each(listeners.begin(), listeners.end(),
                   [this](const std::shared_ptr<EventListener>& e) {

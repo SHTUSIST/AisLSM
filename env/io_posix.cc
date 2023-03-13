@@ -180,6 +180,9 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
         printf("invalid io_uring_wait_cqe\n");
         return nullptr;
       }
+      void* data = io_uring_cqe_get_data(cqe);
+      if(data != nullptr)
+        free(data);
       io_uring_cqe_seen(&uptr->uring, cqe);
     }
     uptr->count = 0;
