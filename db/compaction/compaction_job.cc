@@ -622,11 +622,11 @@ Status CompactionJob::Run() {
   LogCompaction();
 
   const size_t num_threads = compact_->sub_compact_states.size();
-  // zl modified: uptr->data
+  // zl modified: uptr->version_pointer
   struct uring_queue* uptr = urings.get_empty_element(job_id_);
   Compaction* compaction = compact_->compaction;
   compaction->uptr = uptr;
-  uptr->data = static_cast<void*>(compaction->input_version());
+  uptr->version_pointer = static_cast<void*>(compaction->input_version());
   compaction->input_version()->Ref();  
   //compact_->uptr = 
   assert(num_threads > 0);
@@ -1542,13 +1542,15 @@ Status CompactionJob::FinishCompactionOutputFile(
     }
   }
   // zl modified: compaction wait: 
+
+
   for (size_t i = 0; i < sub_compact->compaction->num_input_levels(); i++){
     for (size_t j = 0; j < sub_compact->compaction->num_input_files(i); j++){
       FileMetaData* fp = sub_compact->compaction->input(i,j);
       
       if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
         // waitasync: 
-        outputs.GetFileWriter()->WaitASync(fp->uptr);
+        outputs.GetFileWriter()->WaitASyncSST(fp->uptr);
       }
       fp->uptr = nullptr;
     }
@@ -1562,6 +1564,15 @@ Status CompactionJob::FinishCompactionOutputFile(
     file_checksum = meta->file_checksum;
     file_checksum_func_name = meta->file_checksum_func_name;
   }
+
+    // huyp wait write with write_count times and submit sync request sync_count times
+  // should be after writesynclose
+  // how to get this job's uring?
+  // for (size_t i = 0; i < count; i++)
+  // {
+  //   /* code */
+  // }
+  
 
   if (s.ok()) {
     s = io_s;

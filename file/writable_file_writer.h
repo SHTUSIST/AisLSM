@@ -283,7 +283,7 @@ class WritableFileWriter {
   // Lei modified: Async declare
   IOStatus ASync(bool use_fsync, struct uring_queue* uptr);
 
-  IOStatus WaitASync(struct uring_queue* uptr);
+  IOStatus WaitASyncSST(struct uring_queue* uptr);
 
   // Sync only the data that was already Flush()ed. Safe to call concurrently
   // with Append() and Flush(). If !writable_file_->IsSyncThreadSafe(),

@@ -54,9 +54,13 @@ namespace ROCKSDB_NAMESPACE {
 // The struct pass to io_uring_set_data.
 struct uring_queue{
   struct io_uring uring;
-  void* data = nullptr;
+  // store the compaction pointer
+  void* version_pointer = nullptr;
   std::atomic<bool> running;
-  uint16_t count = 0;
+  // count the number of asynchronous write request
+  uint16_t write_count = 0;
+  // count the number of sync request
+  uint16_t sync_count = 0;
   // bool flag = false;
   uint32_t job_id;
   uint16_t id;
@@ -78,14 +82,18 @@ class Urings{
     printf("clear!\n");
   }
     struct uring_queue* get_empty_element(uint32_t id);
-    struct uring_queue* wait_for_queue(struct uring_queue* uptr);
+    struct uring_queue* wait_for_sync_sst(struct uring_queue* uptr);
     bool init_queues(uint16_t compaction_num = 256, uint8_t log_num = 8, uint16_t compaction_depth = 64, uint16_t log_depth = 64);
     struct uring_queue** log_urings = nullptr;
     bool init = false;
   private: 
     void clear_all(uring_type queue_type);
     uint16_t get_id(uint16_t num, uint16_t mask);
-    struct uring_queue* wait_for_compaction(struct uring_queue* uptr);
+
+    // If wait_number is smaller than zero, then only wait half of total queue. 
+    // This happens queue depth is running out
+    struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number);
+    
     struct uring_queue** compaction_urings = nullptr;
     // huyp change to public
     // struct uring_queue** log_urings = nullptr;
@@ -434,7 +442,7 @@ class PosixWritableFile : public FSWritableFile {
   // Lei modified: writable file async declare
   virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
   virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
-  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus WaitASyncSST(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
 
   virtual bool IsSyncThreadSafe() const override;
   virtual bool use_direct_io() const override { return use_direct_io_; }
@@ -540,7 +548,7 @@ class PosixMmapFile : public FSWritableFile {
   // Lei modified: mmap file async declare
   virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
   virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
-  virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus WaitASyncSST(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
 
   virtual uint64_t GetFileSize(const IOOptions& opts,
                                IODebugContext* dbg) override;

@@ -67,10 +67,11 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   {
     struct uring_queue* qptr;
     qptr = new struct uring_queue();
-    qptr->data = nullptr;
+    qptr->version_pointer= nullptr;
     qptr->running = false;
     qptr->id = i;
-    qptr->count = 0;
+    qptr->write_count = 0;
+    qptr->sync_count = 0;
     if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
     {
       init_lib = false;
@@ -89,9 +90,10 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   {
     struct uring_queue* qptr;
     qptr = new struct uring_queue();
-    qptr->data = nullptr;
+    qptr->version_pointer = nullptr;
     qptr->running = false;
-    qptr->count = 0;
+    qptr->write_count = 0;
+    qptr->sync_count = 0;
     qptr->id = i;
     if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
     {
@@ -117,7 +119,7 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   {
     if (counter_for_while>64)
     {
-      this->wait_for_queue(uptr);
+      this->wait_for_sync_sst(uptr);
       break;
     }
     counter_for_while += 1;
@@ -165,31 +167,28 @@ void Urings::clear_all(uring_type queue_type)
 
 
 /* Wait for count times, data will reset to nullptr, need to store it before. */
-struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
+struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
 {
   if(!uptr->running) return uptr;
-  if(uptr->count > 0)
+  void* data;
+  int ret ;
+  if(LIKELY(uptr->sync_count > 0))
   {
     struct io_uring_cqe* cqe;
-    for(uint16_t i = 0; i < uptr->count; ++i)
+    for(uint16_t i = 0; i < uptr->sync_count; ++i)
     {
       // io_uring_wait_cqe_nr is proved to be bad to use.
-      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
-      if(ret < 0)
+    ret  = io_uring_wait_cqe(&uptr->uring, &cqe);
+      if(UNLIKELY(ret < 0))
       {
         printf("invalid io_uring_wait_cqe\n");
         return nullptr;
       }
-      void* data = io_uring_cqe_get_data(cqe);
-
-      // Only free data for aappend. 
-      if(data != nullptr)
-        free(data);
       io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    uptr->count = 0;
-    static_cast<Version*>(uptr->data)->Unref();
-    uptr->data = nullptr;
+    uptr->sync_count = 0;
+    static_cast<Version*>(uptr->version_pointer)->Unref();
+    uptr->version_pointer = nullptr;
     //zl: Close fds.
     while(!uptr->fds.empty())
     {
@@ -201,27 +200,46 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
   return uptr;
 }
 
-struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
+
+
+struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number)
 {
-  if(!uptr->running) return uptr;
-  if(uptr->count > 0)
+ if(!uptr->running) return uptr;
+  void* data;
+  if(LIKELY(uptr->write_count > 0))
   {
     struct io_uring_cqe* cqe;
-    for(uint16_t i = 0; i < uptr->count; ++i)
+
+    if (wait_number<0)
     {
-      int ret =  io_uring_wait_cqe(&uptr->uring, &cqe);
+      wait_number = uptr->write_count / 2;
+    }
+    
+
+
+    for(uint16_t i = 0; i < wait_number; ++i)
+    {
+      // io_uring_wait_cqe_nr is proved to be bad to use.
+      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
       if(ret < 0)
       {
         printf("invalid io_uring_wait_cqe\n");
         return nullptr;
       }
+      data = io_uring_cqe_get_data(cqe);
+
+      // Only free data for aappend. 
+      if(data != nullptr)
+        free(data);
       io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    uptr->data = nullptr;
+    uptr->write_count -= wait_number;
+
   }
-  uptr->running.store(false);
   return uptr;
 }
+
+
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name) {
   if (file_name.empty()) {
@@ -1402,7 +1420,7 @@ IOStatus PosixMmapFile::ASync(const IOOptions& opts, IODebugContext* dbg, struct
 IOStatus PosixMmapFile::AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr){
   return Fsync(opts, dbg);
 }
-IOStatus PosixMmapFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
+IOStatus PosixMmapFile::WaitASyncSST(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
 {
   return IOStatus::OK();
 }
@@ -1521,7 +1539,7 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
   {
     printf("No more sqe available for APositionedAppend !\n");
   }
-  uptr->count += 1;
+  uptr->write_count += 1;
   io_uring_prep_write(sqe, fd_, data_copy, nbytes, filesize_);
   // Set data after prep.
   io_uring_sqe_set_data(sqe, data_copy);
@@ -1660,7 +1678,7 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   }
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
-  uptr->count += 1;
+  uptr->sync_count += 1;
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
@@ -1670,16 +1688,10 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
   // If want to add flag on footer, should change here.
   // if(uptr->flag)
-    io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
   // Set data can transmit datas
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;
 
-  int ret = io_uring_submit(uq);
-  if(ret <= 0)
-  {
-    printf("Submition failed of fsync !\n");
-  }
   uptr->fds.push_back(fd_);
   //printf("ASync: fd:%d, uq: %p\n", fd_, uptr);
   return IOStatus::OK();
@@ -1694,7 +1706,7 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
     printf("No more uq_t available for fsync !\n");
   }
   struct io_uring *uq = &uptr->uring;
-  uptr->count += 1;
+  uptr->write_count += 1;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   if(sqe == nullptr)
   {
@@ -1711,19 +1723,14 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
   //io_uring_sqe_set_data(sqe, (void*) uq);
   struct io_uring_cqe* cqe = nullptr;
 
-  int ret = io_uring_submit(uq);
-  if(ret <= 0)
-  {
-    printf("Submition failed of fsync !\n");
-  }
-  //printf("AFSync: fd:%d, uq: %p\n", fd_, uptr);
+
   return IOStatus::OK();
 }
 
-IOStatus PosixWritableFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
+IOStatus PosixWritableFile::WaitASyncSST(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
 {
-  urings.wait_for_queue(uptr);
-  // printf("WaitASync: uq: %p\n", uq_t);
+  urings.wait_for_sync_sst(uptr);
+  // printf("WaitASyncSST: uq: %p\n", uq_t);
   return IOStatus::OK();
 }
 bool PosixWritableFile::IsSyncThreadSafe() const { return true; }
