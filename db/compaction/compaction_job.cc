@@ -1565,13 +1565,8 @@ Status CompactionJob::FinishCompactionOutputFile(
     file_checksum_func_name = meta->file_checksum_func_name;
   }
 
-    // huyp wait write with write_count times and submit sync request sync_count times
-  // should be after writesynclose
-  // how to get this job's uring?
-  // for (size_t i = 0; i < count; i++)
-  // {
-  //   /* code */
-  // }
+  //huyp: wait write with write_count times and submit sync request sync_count times
+  struct uring_queue* uptr = compact_->compaction->uptr;
   
 
   if (s.ok()) {
