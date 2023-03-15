@@ -1024,7 +1024,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
     if(urings.init)
     {
       //huyp:modify bug
-      s = writable_file_->AFsync(io_options, nullptr, uptr);
+      s = writable_file_->ASync(io_options, nullptr, uptr);
     }
     else
     {

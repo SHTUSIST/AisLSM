@@ -1706,7 +1706,7 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
     printf("No more uq_t available for fsync !\n");
   }
   struct io_uring *uq = &uptr->uring;
-  uptr->write_count += 1;
+  uptr->sync_count += 1;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
   if(sqe == nullptr)
   {
