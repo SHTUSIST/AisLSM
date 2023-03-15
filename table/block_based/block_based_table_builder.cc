@@ -1821,10 +1821,11 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
   else
   {
     ios = r->file->Awrite_footer_append(footer.GetSlice());
+    io_uring_submit(&r->file->uptr_->uring);
+
     // If want to add flag on footer, this should have a flag.
   //  r->file->uptr_->flag = true;
   }
-  io_uring_submit(&r->file->uptr_->uring);
   if (ios.ok()) {
     r->set_offset(r->get_offset() + footer.GetSlice().size());
   } else {

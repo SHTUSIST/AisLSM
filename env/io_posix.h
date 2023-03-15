@@ -81,6 +81,7 @@ class Urings{
     init = false;
     printf("clear!\n");
   }
+    struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number);
     struct uring_queue* get_empty_element(uint32_t id);
     struct uring_queue* wait_for_sync_sst(struct uring_queue* uptr);
     bool init_queues(uint16_t compaction_num = 256, uint8_t log_num = 8, uint16_t compaction_depth = 64, uint16_t log_depth = 64);
@@ -92,7 +93,6 @@ class Urings{
 
     // If wait_number is smaller than zero, then only wait half of total queue. 
     // This happens queue depth is running out
-    struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number);
     
     struct uring_queue** compaction_urings = nullptr;
     // huyp change to public

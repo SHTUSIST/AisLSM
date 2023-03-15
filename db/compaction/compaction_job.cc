@@ -1567,6 +1567,37 @@ Status CompactionJob::FinishCompactionOutputFile(
 
   //huyp: wait write with write_count times and submit sync request sync_count times
   struct uring_queue* uptr = compact_->compaction->uptr;
+
+  // wait write with write_count times
+  void* data;
+  struct io_uring_cqe* cqe;
+
+  for(uint16_t i = 0; i < uptr->write_count; ++i)
+  {
+    // io_uring_wait_cqe_nr is proved to be bad to use.
+    int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+    if(ret < 0)
+    {
+      printf("invalid io_uring_wait_cqe\n");
+    }
+    data = io_uring_cqe_get_data(cqe);
+
+    // Only free data for aappend. 
+    if(data != nullptr)
+      free(data);
+    io_uring_cqe_seen(&uptr->uring, cqe);
+  }
+  uptr->write_count = 0;
+
+
+  //submit sync 
+  int ret = io_uring_submit(&uptr->uring);
+  if(ret <= 0)
+  {
+    printf("Submition failed of fsync !\n");
+  }
+
+  
   
 
   if (s.ok()) {
