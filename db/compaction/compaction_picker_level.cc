@@ -37,7 +37,7 @@ bool LevelCompactionPicker::NeedsCompaction(
     return true;
   }
   for (int i = 0; i <= vstorage->MaxInputLevel(); i++) {
-    if (vstorage->CompactionScore(i) >= 1) {
+    if (vstorage->CompactionScore(i) >= 1) { // 1.2
       return true;
     }
   }

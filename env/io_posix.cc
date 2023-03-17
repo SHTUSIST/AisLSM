@@ -171,21 +171,32 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
   if(!uptr->running) return uptr;
   if(uptr->count > 0)
   {
-    struct io_uring_cqe* cqe[uptr->count];
-    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
-    //if(unlikely(ret < 0))
-    if(ret < 0)
+    struct io_uring_cqe* cqe;
+    for(uint16_t i = 0; i < uptr->count; ++i)
     {
-      printf("invalid io_uring_wait_cqe\n");
-      return nullptr;
+      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+      if(ret < 0)
+      {
+        printf("invalid io_uring_wait_cqe\n");
+        return nullptr;
+      }
+      io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    for(uint8_t i = 0; i < uptr->count; ++i)
-      io_uring_cqe_seen(&uptr->uring, cqe[i]);
     uptr->count = 0;
+    while(!uptr->fds.empty())
+    {
+      int fd = uptr->fds.back();
+      int result = close(fd);
+      uptr->fds.pop_back();
+    }
+  }
+  if(uptr->fds.empty())
+  {
+    uptr->running.store(false);
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
   }
-  uptr->running.store(false);
+  
   return uptr;
 }
 
@@ -194,19 +205,31 @@ struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
   if(!uptr->running) return uptr;
   if(uptr->count > 0)
   {
-    struct io_uring_cqe* cqe[uptr->count];
-    int ret = io_uring_wait_cqe_nr(&uptr->uring, cqe, uptr->count);
-    //if(unlikely(ret < 0))
-    if(ret < 0)
+    struct io_uring_cqe* cqe;
+    for(uint16_t i = 0; i < uptr->count; ++i)
     {
-      printf("invalid io_uring_wait_cqe\n");
-      return nullptr;
+      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+      if(ret < 0)
+      {
+        printf("invalid io_uring_wait_cqe\n");
+        return nullptr;
+      }
+      io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    while(uptr->count-- > 0)
-      io_uring_cqe_seen(&uptr->uring, cqe[uptr->count]);
+    uptr->count = 0;
+    while(!uptr->fds.empty())
+    {
+      int fd = uptr->fds.back();
+      int result = close(fd);
+      uptr->fds.pop_back();
+    }
+  }
+  if(uptr->fds.empty())
+  {
+    uptr->running.store(false);
+    static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
   }
-  uptr->running.store(false);
   return uptr;
 }
 std::string IOErrorMsg(const std::string& context,
@@ -1311,6 +1334,26 @@ IOStatus PosixMmapFile::Append(const Slice& data, const IOOptions& /*opts*/,
   return IOStatus::OK();
 }
 
+
+IOStatus PosixMmapFile::AClose(const IOOptions& /*opts*/,
+                              IODebugContext* /*dbg*/) {
+  IOStatus s;
+  size_t unused = limit_ - dst_;
+
+  s = UnmapCurrentRegion();
+  if (!s.ok()) {
+    s = IOError("While closing mmapped file", filename_, errno);
+  } else if (unused > 0) {
+    // Trim the extra space at the end of the file
+    if (ftruncate(fd_, file_offset_ - unused) < 0) {
+      s = IOError("While ftruncating mmaped file", filename_, errno);
+    }
+  }
+  fd_ = -1;
+  base_ = nullptr;
+  limit_ = nullptr;
+  return s;
+}
 IOStatus PosixMmapFile::Close(const IOOptions& /*opts*/,
                               IODebugContext* /*dbg*/) {
   IOStatus s;
@@ -1517,9 +1560,55 @@ IOStatus PosixWritableFile::Truncate(uint64_t size, const IOOptions& /*opts*/,
   return s;
 }
 
+IOStatus PosixWritableFile::AClose(const IOOptions& /*opts*/,
+                                  IODebugContext* /*dbg*/) {
+  IOStatus s;
+  size_t block_size;
+  size_t last_allocated_block;
+  GetPreallocationStatus(&block_size, &last_allocated_block);
+  TEST_SYNC_POINT_CALLBACK("PosixWritableFile::Close", &last_allocated_block);
+  if (last_allocated_block > 0) {
+    // trim the extra space preallocated at the end of the file
+    // NOTE(ljin): we probably don't want to surface failure as an IOError,
+    // but it will be nice to log these errors.
+    int dummy __attribute__((__unused__));
+    dummy = ftruncate(fd_, filesize_);
+#if defined(ROCKSDB_FALLOCATE_PRESENT) && defined(FALLOC_FL_PUNCH_HOLE)
+    // in some file systems, ftruncate only trims trailing space if the
+    // new file size is smaller than the current size. Calling fallocate
+    // with FALLOC_FL_PUNCH_HOLE flag to explicitly release these unused
+    // blocks. FALLOC_FL_PUNCH_HOLE is supported on at least the following
+    // filesystems:
+    //   XFS (since Linux 2.6.38)
+    //   ext4 (since Linux 3.0)
+    //   Btrfs (since Linux 3.7)
+    //   tmpfs (since Linux 3.5)
+    // We ignore error since failure of this operation does not affect
+    // correctness.
+    struct stat file_stats;
+    int result = fstat(fd_, &file_stats);
+    // After ftruncate, we check whether ftruncate has the correct behavior.
+    // If not, we should hack it with FALLOC_FL_PUNCH_HOLE
+    if (result == 0 &&
+        (file_stats.st_size + file_stats.st_blksize - 1) /
+                file_stats.st_blksize !=
+            file_stats.st_blocks / (file_stats.st_blksize / 512)) {
+      IOSTATS_TIMER_GUARD(allocate_nanos);
+      if (allow_fallocate_) {
+        fallocate(fd_, FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE, filesize_,
+                  block_size * last_allocated_block - filesize_);
+      }
+    }
+#endif
+  }
+  fd_ = -1;
+  return s;
+}
+
+
 IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/) {
-                                    struct io_uring_cqe* cqe = nullptr;
+
   IOStatus s;
   //
   size_t block_size;
@@ -1613,6 +1702,7 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   }
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  uptr->fds.push_back(fd_);
   uptr->count += 1;
   if(sqe == nullptr)
   {
@@ -1644,8 +1734,9 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
     printf("No more uq_t available for fsync !\n");
   }
   struct io_uring *uq = &uptr->uring;
-  uptr->count += 1;
   struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  uptr->fds.push_back(fd_);
+  uptr->count += 1;
   if(sqe == nullptr)
   {
     printf("No more sqe available for fsync !\n");
