@@ -192,9 +192,9 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
   }
   if(uptr->fds.empty())
   {
-    uptr->running.store(false);
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
+    uptr->running.store(false);
   }
   
   return uptr;
@@ -226,9 +226,9 @@ struct uring_queue* wait_for_compaction(struct uring_queue* uptr)
   }
   if(uptr->fds.empty())
   {
-    uptr->running.store(false);
     static_cast<Version*>(uptr->data)->Unref();
     uptr->data = nullptr;
+    uptr->running.store(false);
   }
   return uptr;
 }
