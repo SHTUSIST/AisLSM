@@ -1747,13 +1747,9 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
   // Lei Todo: this place should act like fdatasync, which means having flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
   // If want to add flag on footer, should change here.
-  // if(uptr->flag)
-  // Set data can transmit datas
-  //io_uring_sqe_set_data(sqe, (void*) uq);
-  struct io_uring_cqe* cqe = nullptr;
+
 
   uptr->fds.push_back(fd_);
-  //printf("ASync: fd:%d, uq: %p\n", fd_, uptr);
   return IOStatus::OK();
 }
 
@@ -1775,13 +1771,9 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
 
   // Lei Todo: this place should act like fsync, which means no flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
-  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
 
   // Record all fds should close afterwards.
   uptr->fds.push_back(fd_);
-  // Set data can transmit datas
-  //io_uring_sqe_set_data(sqe, (void*) uq);
-  struct io_uring_cqe* cqe = nullptr;
 
 
   return IOStatus::OK();
