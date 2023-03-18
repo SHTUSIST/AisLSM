@@ -1822,6 +1822,8 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
   {
     ios = r->file->Awrite_footer_append(footer.GetSlice());
     io_uring_submit(&r->file->uptr_->uring);
+    r->file->uptr_->write_count+=r->file->uptr_->prep_write_count;
+    r->file->uptr_->prep_write_count = 0;
 
     // If want to add flag on footer, this should have a flag.
   //  r->file->uptr_->flag = true;

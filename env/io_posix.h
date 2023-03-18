@@ -57,8 +57,9 @@ struct uring_queue{
   // store the compaction pointer
   void* version_pointer = nullptr;
   std::atomic<bool> running;
-  // count the number of asynchronous write request
+  // count the number of asynchronous write request anr prep_write request
   uint16_t write_count = 0;
+  uint16_t prep_write_count = 0;
   // count the number of sync request
   uint16_t sync_count = 0;
   // bool flag = false;

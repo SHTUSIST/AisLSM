@@ -1396,35 +1396,32 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   }
 
 
-    //huyp: wait write with write_count times and submit sync request sync_count times
+    //huyp: wait write with prep_write_count times and submit sync request sync_count times
   struct uring_queue* uptr = compact_->compaction->uptr;
 
-  // wait write with write_count times
+  // wait write with prep_write_count times
   void* data;
   struct io_uring_cqe* cqe;
+  struct io_uring *uq = &uptr->uring;
 
   for(uint16_t i = 0; i < uptr->write_count; ++i)
   {
-    // io_uring_wait_cqe_nr is proved to be bad to use.
-    int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+    int ret = io_uring_wait_cqe(uq, &cqe);
     if(ret < 0)
     {
-      printf("invalid io_uring_wait_cqe\n");
+      printf("invalid waiting cqe\n");
     }
     data = io_uring_cqe_get_data(cqe);
 
     // Only free data for aappend. 
     if(data != nullptr)
       free(data);
-    io_uring_cqe_seen(&uptr->uring, cqe);
+    io_uring_cqe_seen(uq, cqe);
   }
+  uptr->prep_write_count = 0;
   uptr->write_count = 0;
 
   //prep and submit sync 
-  struct io_uring *uq = &uptr->uring;
-
-
-  // prep_sync every file of compaction and then close it. 
   int fd_;
   struct io_uring_sqe* sqe;
   for(size_t i = 0; i < uptr->fds.size(); ++i)

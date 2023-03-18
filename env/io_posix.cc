@@ -70,6 +70,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr->version_pointer= nullptr;
     qptr->running = false;
     qptr->id = i;
+    qptr->prep_write_count = 0;
     qptr->write_count = 0;
     qptr->sync_count = 0;
     if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
@@ -92,7 +93,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr = new struct uring_queue();
     qptr->version_pointer = nullptr;
     qptr->running = false;
-    qptr->write_count = 0;
+    qptr->prep_write_count = 0;
     qptr->sync_count = 0;
     qptr->id = i;
     if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
@@ -178,8 +179,7 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
     struct io_uring_cqe* cqe;
     for(uint16_t i = 0; i < uptr->sync_count; ++i)
     {
-      // io_uring_wait_cqe_nr is proved to be bad to use.
-    ret  = io_uring_wait_cqe(&uptr->uring, &cqe);
+      ret  = io_uring_wait_cqe(&uptr->uring, &cqe);
       if(UNLIKELY(ret < 0))
       {
         printf("invalid io_uring_wait_cqe\n");
@@ -193,46 +193,12 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
       uptr->fds.pop_back();               
     }
     uptr->sync_count = 0;
+    uptr->prep_write_count = 0;
+    uptr->write_count = 0;
     static_cast<Version*>(uptr->version_pointer)->Unref();
     uptr->version_pointer = nullptr;
   }
   uptr->running.store(false);
-  return uptr;
-}
-
-
-
-struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number)
-{
- if(!uptr->running) return uptr;
-  void* data;
-  if(LIKELY(uptr->write_count > 0))
-  {
-    struct io_uring_cqe* cqe;
-
-    if (wait_number<0)
-    {
-      wait_number = uptr->write_count / 2;
-    }
-    for(uint16_t i = 0; i < wait_number; ++i)
-    {
-      // io_uring_wait_cqe_nr is proved to be bad to use.
-      int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
-      if(ret < 0)
-      {
-        printf("invalid io_uring_wait_cqe\n");
-        return nullptr;
-      }
-      data = io_uring_cqe_get_data(cqe);
-
-      // Only free data for aappend. 
-      if(data != nullptr)
-        free(data);
-      io_uring_cqe_seen(&uptr->uring, cqe);
-    }
-    uptr->write_count -= wait_number;
-
-  }
   return uptr;
 }
 
@@ -1556,7 +1522,7 @@ IOStatus PosixWritableFile::AAppend(const Slice& data, const IOOptions& opts/**/
   {
     printf("No more sqe available for APositionedAppend !\n");
   }
-  uptr->write_count += 1;
+  uptr->prep_write_count += 1;
   io_uring_prep_write(sqe, fd_, data_copy, nbytes, filesize_);
   // Set data after prep.
   io_uring_sqe_set_data(sqe, data_copy);
