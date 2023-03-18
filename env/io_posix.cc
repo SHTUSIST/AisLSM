@@ -112,7 +112,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
 }
 struct uring_queue* Urings::get_empty_element(uint32_t id)
 {
-  uint32_t index = 0;
+  uint32_t index =  (id) % (this->compaction_queue_size);
   uint32_t counter_for_while = 0;
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
@@ -186,6 +186,11 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
         return nullptr;
       }
       io_uring_cqe_seen(&uptr->uring, cqe);
+    }
+    while (!uptr->fds.empty()) {
+      int fd_ = uptr->fds.back(); 
+      close(fd_);
+      uptr->fds.pop_back();               
     }
     uptr->sync_count = 0;
     static_cast<Version*>(uptr->version_pointer)->Unref();

@@ -1427,21 +1427,17 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   // prep_sync every file of compaction and then close it. 
   int fd_;
   struct io_uring_sqe* sqe;
-  while (!uptr->fds.empty()) {
-    fd_ = uptr->fds.back(); 
-
+  for(size_t i = 0; i < uptr->fds.size(); ++i)
+  { 
     sqe = io_uring_get_sqe(uq);
     if(sqe == nullptr)
     {
       printf("No more sqe available for fsync !\n");
     }
     io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
-    close(fd_);
-    
-    uptr->fds.pop_back();               
-    uptr->sync_count += 1;
-
+      uptr->sync_count += 1;
   }
+  
 
   if(io_uring_submit(&uptr->uring) <= 0)
   {
