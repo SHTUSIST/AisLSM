@@ -190,12 +190,6 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
     uptr->sync_count = 0;
     static_cast<Version*>(uptr->version_pointer)->Unref();
     uptr->version_pointer = nullptr;
-    //zl: Close fds.
-    while(!uptr->fds.empty())
-    {
-      close(uptr->fds.back());
-      uptr->fds.pop_back();
-    }
   }
   uptr->running.store(false);
   return uptr;
@@ -1731,23 +1725,9 @@ IOStatus PosixWritableFile::Fsync(const IOOptions& /*opts*/,
 IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/, struct uring_queue* uptr){
   
-  
-  if(uptr == nullptr)
-  {
-    printf("No more uq_t available for fsync !\n");
-  }
-  struct io_uring *uq = &uptr->uring;
-  struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
-  uptr->sync_count += 1;
-  if(sqe == nullptr)
-  {
-    printf("No more sqe available for fsync !\n");
-  }
-
   // Lei Todo: this place should act like fdatasync, which means having flag IORING_FSYNC_DATASYNC.
-  io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  // io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
   // If want to add flag on footer, should change here.
-
 
   uptr->fds.push_back(fd_);
   return IOStatus::OK();

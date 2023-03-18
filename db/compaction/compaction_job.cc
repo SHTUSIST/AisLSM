@@ -1395,6 +1395,60 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     sub_compact->Current().UpdateBlobStats();
   }
 
+
+    //huyp: wait write with write_count times and submit sync request sync_count times
+  struct uring_queue* uptr = compact_->compaction->uptr;
+
+  // wait write with write_count times
+  void* data;
+  struct io_uring_cqe* cqe;
+
+  for(uint16_t i = 0; i < uptr->write_count; ++i)
+  {
+    // io_uring_wait_cqe_nr is proved to be bad to use.
+    int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
+    if(ret < 0)
+    {
+      printf("invalid io_uring_wait_cqe\n");
+    }
+    data = io_uring_cqe_get_data(cqe);
+
+    // Only free data for aappend. 
+    if(data != nullptr)
+      free(data);
+    io_uring_cqe_seen(&uptr->uring, cqe);
+  }
+  uptr->write_count = 0;
+
+  //prep and submit sync 
+  struct io_uring *uq = &uptr->uring;
+
+
+  // prep_sync every file of compaction and then close it. 
+  int fd_;
+  struct io_uring_sqe* sqe;
+  while (!uptr->fds.empty()) {
+    fd_ = uptr->fds.back(); 
+
+    sqe = io_uring_get_sqe(uq);
+    if(sqe == nullptr)
+    {
+      printf("No more sqe available for fsync !\n");
+    }
+    io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+    close(fd_);
+    
+    uptr->fds.pop_back();               
+    uptr->sync_count += 1;
+
+  }
+
+  if(io_uring_submit(&uptr->uring) <= 0)
+  {
+    printf("Submition failed of fsync !\n");
+  }
+
+
   sub_compact->compaction_job_stats.cpu_micros =
       db_options_.clock->CPUMicros() - prev_cpu_micros;
 
@@ -1565,38 +1619,6 @@ Status CompactionJob::FinishCompactionOutputFile(
     file_checksum_func_name = meta->file_checksum_func_name;
   }
 
-  //huyp: wait write with write_count times and submit sync request sync_count times
-  struct uring_queue* uptr = compact_->compaction->uptr;
-
-  // wait write with write_count times
-  void* data;
-  struct io_uring_cqe* cqe;
-
-  for(uint16_t i = 0; i < uptr->write_count; ++i)
-  {
-    // io_uring_wait_cqe_nr is proved to be bad to use.
-    int ret = io_uring_wait_cqe(&uptr->uring, &cqe);
-    if(ret < 0)
-    {
-      printf("invalid io_uring_wait_cqe\n");
-    }
-    data = io_uring_cqe_get_data(cqe);
-
-    // Only free data for aappend. 
-    if(data != nullptr)
-      free(data);
-    io_uring_cqe_seen(&uptr->uring, cqe);
-  }
-  uptr->write_count = 0;
-
-  //submit sync 
-  int ret = io_uring_submit(&uptr->uring);
-  if(ret <= 0)
-  {
-    printf("Submition failed of fsync !\n");
-  }
-
-  
   
 
   if (s.ok()) {
