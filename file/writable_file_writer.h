@@ -277,7 +277,8 @@ class WritableFileWriter {
   IOStatus AsyncFlush(Env::IOPriority op_rate_limiter_priority = Env::IO_TOTAL);
 
   IOStatus Close();
-
+  IOStatus AClose();
+  
   IOStatus Sync(bool use_fsync);
 
   // Lei modified: Async declare

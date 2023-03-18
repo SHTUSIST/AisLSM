@@ -413,6 +413,8 @@ class PosixWritableFile : public FSWritableFile {
   virtual IOStatus Truncate(uint64_t size, const IOOptions& opts,
                             IODebugContext* dbg) override;
   virtual IOStatus Close(const IOOptions& opts, IODebugContext* dbg) override;
+  virtual IOStatus AClose(const IOOptions& opts, IODebugContext* dbg) override;
+
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
                           IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
@@ -525,6 +527,8 @@ class PosixMmapFile : public FSWritableFile {
     return IOStatus::OK();
   }
   virtual IOStatus Close(const IOOptions& opts, IODebugContext* dbg) override;
+  virtual IOStatus AClose(const IOOptions& opts, IODebugContext* dbg) override;
+
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
                           IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,

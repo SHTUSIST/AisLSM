@@ -593,6 +593,7 @@ Status DBImpl::CloseHelper() {
          bg_flush_scheduled_ || bg_purge_scheduled_ ||
          pending_purge_obsolete_files_ ||
          error_handler_.IsRecoveryInProgress()) {
+           //
     TEST_SYNC_POINT("DBImpl::~DBImpl:WaitJob");
     bg_cv_.Wait();
   }

@@ -813,7 +813,7 @@ Status CompactionJob::Run() {
   RecordCompactionIOStats();
   LogFlush(db_options_.info_log);
   TEST_SYNC_POINT("CompactionJob::Run():End");
-
+  //
   compact_->status = status;
   return status;
 }
@@ -1588,7 +1588,6 @@ Status CompactionJob::FinishCompactionOutputFile(
     io_uring_cqe_seen(&uptr->uring, cqe);
   }
   uptr->write_count = 0;
-
 
   //submit sync 
   int ret = io_uring_submit(&uptr->uring);

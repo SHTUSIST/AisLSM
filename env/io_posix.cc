@@ -117,7 +117,7 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    if (counter_for_while>64)
+    if (counter_for_while > 64)
     {
       this->wait_for_sync_sst(uptr);
       break;
@@ -142,6 +142,7 @@ void Urings::clear_all(uring_type queue_type)
         {
 
         }*/
+        struct uring_queue* uptr = this->compaction_urings[i];
         io_uring_queue_exit(&(this->compaction_urings[i]->uring));
       }
       delete this->compaction_urings;
@@ -214,9 +215,6 @@ struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number)
     {
       wait_number = uptr->write_count / 2;
     }
-    
-
-
     for(uint16_t i = 0; i < wait_number; ++i)
     {
       // io_uring_wait_cqe_nr is proved to be bad to use.
@@ -1347,6 +1345,26 @@ IOStatus PosixMmapFile::Append(const Slice& data, const IOOptions& /*opts*/,
   return IOStatus::OK();
 }
 
+IOStatus PosixMmapFile::AClose(const IOOptions& /*opts*/,
+                              IODebugContext* /*dbg*/) {
+  IOStatus s;
+  size_t unused = limit_ - dst_;
+
+  s = UnmapCurrentRegion();
+  if (!s.ok()) {
+    s = IOError("While closing mmapped file", filename_, errno);
+  } else if (unused > 0) {
+    // Trim the extra space at the end of the file
+    if (ftruncate(fd_, file_offset_ - unused) < 0) {
+      s = IOError("While ftruncating mmaped file", filename_, errno);
+    }
+  }
+  fd_ = -1;
+  base_ = nullptr;
+  limit_ = nullptr;
+  return s;
+}
+
 IOStatus PosixMmapFile::Close(const IOOptions& /*opts*/,
                               IODebugContext* /*dbg*/) {
   IOStatus s;
@@ -1580,7 +1598,50 @@ IOStatus PosixWritableFile::Truncate(uint64_t size, const IOOptions& /*opts*/,
   }
   return s;
 }
-
+IOStatus PosixWritableFile::AClose(const IOOptions& /*opts*/,
+                                  IODebugContext* /*dbg*/) {
+  IOStatus s;
+  size_t block_size;
+  size_t last_allocated_block;
+  GetPreallocationStatus(&block_size, &last_allocated_block);
+  TEST_SYNC_POINT_CALLBACK("PosixWritableFile::Close", &last_allocated_block);
+  if (last_allocated_block > 0) {
+    // trim the extra space preallocated at the end of the file
+    // NOTE(ljin): we probably don't want to surface failure as an IOError,
+    // but it will be nice to log these errors.
+    int dummy __attribute__((__unused__));
+    dummy = ftruncate(fd_, filesize_);
+#if defined(ROCKSDB_FALLOCATE_PRESENT) && defined(FALLOC_FL_PUNCH_HOLE)
+    // in some file systems, ftruncate only trims trailing space if the
+    // new file size is smaller than the current size. Calling fallocate
+    // with FALLOC_FL_PUNCH_HOLE flag to explicitly release these unused
+    // blocks. FALLOC_FL_PUNCH_HOLE is supported on at least the following
+    // filesystems:
+    //   XFS (since Linux 2.6.38)
+    //   ext4 (since Linux 3.0)
+    //   Btrfs (since Linux 3.7)
+    //   tmpfs (since Linux 3.5)
+    // We ignore error since failure of this operation does not affect
+    // correctness.
+    struct stat file_stats;
+    int result = fstat(fd_, &file_stats);
+    // After ftruncate, we check whether ftruncate has the correct behavior.
+    // If not, we should hack it with FALLOC_FL_PUNCH_HOLE
+    if (result == 0 &&
+        (file_stats.st_size + file_stats.st_blksize - 1) /
+                file_stats.st_blksize !=
+            file_stats.st_blocks / (file_stats.st_blksize / 512)) {
+      IOSTATS_TIMER_GUARD(allocate_nanos);
+      if (allow_fallocate_) {
+        fallocate(fd_, FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE, filesize_,
+                  block_size * last_allocated_block - filesize_);
+      }
+    }
+#endif
+  }
+  fd_ = -1;
+  return s;
+}
 IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/) {
   
@@ -1625,10 +1686,9 @@ IOStatus PosixWritableFile::Close(const IOOptions& /*opts*/,
 #endif
   }
 
-  // Should not close, close should happens after sync wait.
-  /*if (close(fd_) < 0) {
+  if (close(fd_) < 0) {
     s = IOError("While closing file after writing", filename_, errno);
-  }*/
+  }
   fd_ = -1;
   return s;
 }
