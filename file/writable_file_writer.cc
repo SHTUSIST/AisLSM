@@ -707,19 +707,6 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
 
   IOOptions io_options;
   io_options.rate_limiter_priority = writable_file_->GetIOPriority();
-  /*if (use_fsync) {
-    #ifndef LIBURING_USE
-    s = writable_file_->Fsync(io_options, nullptr);
-    #else
-    s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
-    #endif
-  } else {
-    #ifndef LIBURING_USE
-    s = writable_file_->Sync(io_options, nullptr);
-    #else
-    s = writable_file_->ASync(io_options, nullptr, uq, queue_type);
-    #endif
-  }*/
   if(use_fsync)
   {
     if(urings.init)
@@ -736,7 +723,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
     if(urings.init)
     {
       //huyp:modify bug
-      s = writable_file_->AFsync(io_options, nullptr, uptr);
+      s = writable_file_->ASync(io_options, nullptr, uptr);
     }
     else
     {
