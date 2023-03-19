@@ -56,7 +56,7 @@ struct uring_queue{
   struct io_uring uring;
   void* data = nullptr;
   std::atomic<bool> running;
-  uint8_t count = 0;
+  uint8_t sync_count = 0;
   uint8_t ref = 0;
   uint32_t job_id;
   uint16_t id;
@@ -84,7 +84,6 @@ class Urings{
   private: 
     void clear_all(uring_type queue_type);
     uint16_t get_id(uint16_t num, uint16_t mask);
-    struct uring_queue* wait_for_compaction(struct uring_queue* uptr);
     struct uring_queue** compaction_urings = nullptr;
     struct uring_queue** log_urings = nullptr;
     uint16_t compaction_queue_size = 0;
