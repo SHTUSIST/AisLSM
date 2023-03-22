@@ -73,7 +73,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr->prep_write_count = 0;
     qptr->write_count = 0;
     qptr->sync_count = 0;
-    if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 0) != 0)
+    if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 1) != 0)
     {
       init_lib = false;
       break;
@@ -97,7 +97,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr->prep_write_count = 0;
     qptr->sync_count = 0;
     qptr->id = i;
-    if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
+    if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 1) != 0)
     {
       init_lib = false;
       break;
