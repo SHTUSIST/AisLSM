@@ -295,6 +295,8 @@ IOStatus WritableFileWriter::Awrite_sstblock_append(const Slice& data, uint32_t 
           src += appended;
 
           if (left > 0) {
+            // Not work under default. 
+            // s = AsyncFlush(op_rate_limiter_priority);
             s = Flush(op_rate_limiter_priority);
             if (!s.ok()) {
               break;
@@ -316,6 +318,8 @@ IOStatus WritableFileWriter::Awrite_sstblock_append(const Slice& data, uint32_t 
     // We never write directly to disk with direct I/O on.
     // or we simply use it for its original purpose to accumulate many small
     // chunks
+
+    // Async point 
     if (use_direct_io() || (buf_.Capacity() >= left)) {
       while (left > 0) {
         size_t appended = buf_.Append(src, left);
@@ -327,7 +331,9 @@ IOStatus WritableFileWriter::Awrite_sstblock_append(const Slice& data, uint32_t 
         src += appended;
 
         if (left > 0) {
-          s = Flush(op_rate_limiter_priority);
+          // Async point 
+          s = AsyncFlush(op_rate_limiter_priority);
+          // s = Flush(op_rate_limiter_priority);
           if (!s.ok()) {
             break;
           }
@@ -443,7 +449,10 @@ IOStatus WritableFileWriter::Awrite_footer_append(const Slice& data, uint32_t cr
           src += appended;
 
           if (left > 0) {
-            s = Flush(op_rate_limiter_priority);
+            // Async point 
+            // not run
+            s = AsyncFlush(op_rate_limiter_priority);
+            // s = Flush(op_rate_limiter_priority);
             if (!s.ok()) {
               break;
             }
@@ -475,7 +484,10 @@ IOStatus WritableFileWriter::Awrite_footer_append(const Slice& data, uint32_t cr
         src += appended;
 
         if (left > 0) {
-          s = Flush(op_rate_limiter_priority);
+          // Async point 
+          // never run
+          // s = Flush(op_rate_limiter_priority);
+          s = AsyncFlush(op_rate_limiter_priority);
           if (!s.ok()) {
             break;
           }
@@ -540,6 +552,10 @@ IOStatus WritableFileWriter::AClose() {
 
   IOStatus s;
   // Flush is dangerous
+  // Async point?
+  // The problem is that it should submit earlier. 
+  // Now give async a try.
+  // s = AsyncFlush();
   s = Flush();  // flush cache to OS
 
   IOStatus interim;
@@ -576,7 +592,9 @@ IOStatus WritableFileWriter::AClose() {
           start_ts = FileOperationInfo::StartNow();
         }
 #endif
-        interim = writable_file_->Fsync(io_options, nullptr);
+        // Async point
+        // interim = writable_file_->Fsync(io_options, nullptr);
+        interim = writable_file_->ASync(io_options, nullptr, this->uptr_);
 #ifndef ROCKSDB_LITE
         if (ShouldNotifyListeners()) {
           auto finish_ts = FileOperationInfo::FinishNow();
@@ -874,9 +892,20 @@ IOStatus WritableFileWriter::AsyncFlush(Env::IOPriority op_rate_limiter_priority
 #ifndef ROCKSDB_LITE
       if (pending_sync_) {
         if (perform_data_verification_ && buffered_data_with_checksum_) {
-          s = WriteDirectWithChecksum(op_rate_limiter_priority);
+          // Async point
+          // Does not run under default configuration.
+          if(urings.init)
+            s = AWriteDirectWithChecksum(op_rate_limiter_priority);
+          else
+            s = WriteDirectWithChecksum(op_rate_limiter_priority);
+          
         } else {
-          s = WriteDirect(op_rate_limiter_priority);
+          // Async point
+
+          if(urings.init)
+            s = AWriteDirect(op_rate_limiter_priority);
+          else
+            s = WriteDirect(op_rate_limiter_priority);
         }
       }
 #endif  // !ROCKSDB_LITE
@@ -1007,8 +1036,13 @@ IOStatus WritableFileWriter::ASync(bool use_fsync, struct uring_queue* uptr) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
-
+  // flush? Async
+  // The last write here.
+  // Async point
   IOStatus s = Flush();
+  // IOStatus s = AsyncFlush();
+  
+  
   if (!s.ok()) {
     set_seen_error();
     return s;
@@ -1027,6 +1061,7 @@ IOStatus WritableFileWriter::ASync(bool use_fsync, struct uring_queue* uptr) {
 }
 
 IOStatus WritableFileWriter::SyncWithoutFlush(bool use_fsync) {
+  // Haven't see this runs.
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
@@ -1114,19 +1149,6 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
 
   IOOptions io_options;
   io_options.rate_limiter_priority = writable_file_->GetIOPriority();
-  /*if (use_fsync) {
-    #ifndef LIBURING_USE
-    s = writable_file_->Fsync(io_options, nullptr);
-    #else
-    s = writable_file_->AFsync(io_options, nullptr, uq, queue_type);
-    #endif
-  } else {
-    #ifndef LIBURING_USE
-    s = writable_file_->Sync(io_options, nullptr);
-    #else
-    s = writable_file_->ASync(io_options, nullptr, uq, queue_type);
-    #endif
-  }*/
   if(use_fsync)
   {
     if(urings.init)
@@ -1795,6 +1817,7 @@ IOStatus WritableFileWriter::WriteDirectWithChecksum(
     // direct writes must be positional
     EncodeFixed32(checksum_buf, buffered_data_crc32c_checksum_);
     v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+    //apositionedAppend
     s = writable_file_->PositionedAppend(Slice(src, left), write_offset,
                                          io_options, v_info, nullptr);
 
@@ -1831,6 +1854,232 @@ IOStatus WritableFileWriter::WriteDirectWithChecksum(
     // Adjust the checksum value to align with the data in the buffer
     buffered_data_crc32c_checksum_ =
         crc32c::Value(buf_.BufferStart(), buf_.CurrentSize());
+    // This is where we start writing next time which may or not be
+    // the actual file size on disk. They match if the buffer size
+    // is a multiple of whole pages otherwise filesize_ is leftover_tail
+    // behind
+    next_write_offset_ += file_advance;
+  } else {
+    set_seen_error();
+  }
+  return s;
+}
+
+IOStatus WritableFileWriter::AWriteDirectWithChecksum(
+    Env::IOPriority op_rate_limiter_priority) {
+  if (seen_error()) {
+    return AssertFalseAndGetStatusForPrevError();
+  }
+
+  assert(use_direct_io());
+  assert(perform_data_verification_ && buffered_data_with_checksum_);
+  IOStatus s;
+  const size_t alignment = buf_.Alignment();
+  assert((next_write_offset_ % alignment) == 0);
+
+  // Calculate whole page final file advance if all writes succeed
+  const size_t file_advance =
+      TruncateToPageBoundary(alignment, buf_.CurrentSize());
+
+  // Calculate the leftover tail, we write it here padded with zeros BUT we
+  // will write it again in the future either on Close() OR when the current
+  // whole page fills out.
+  const size_t leftover_tail = buf_.CurrentSize() - file_advance;
+
+  // Round up, pad, and combine the checksum.
+  size_t last_cur_size = buf_.CurrentSize();
+  buf_.PadToAlignmentWith(0);
+  size_t padded_size = buf_.CurrentSize() - last_cur_size;
+  const char* padded_start = buf_.BufferStart() + last_cur_size;
+  uint32_t padded_checksum = crc32c::Value(padded_start, padded_size);
+  buffered_data_crc32c_checksum_ = crc32c::Crc32cCombine(
+      buffered_data_crc32c_checksum_, padded_checksum, padded_size);
+
+  const char* src = buf_.BufferStart();
+  uint64_t write_offset = next_write_offset_;
+  size_t left = buf_.CurrentSize();
+  DataVerificationInfo v_info;
+  char checksum_buf[sizeof(uint32_t)];
+
+  Env::IOPriority rate_limiter_priority_used =
+      WritableFileWriter::DecideRateLimiterPriority(
+          writable_file_->GetIOPriority(), op_rate_limiter_priority);
+  IOOptions io_options;
+  io_options.rate_limiter_priority = rate_limiter_priority_used;
+  // Check how much is allowed. Here, we loop until the rate limiter allows to
+  // write the entire buffer.
+  // TODO: need to be improved since it sort of defeats the purpose of the rate
+  // limiter
+  size_t data_size = left;
+  if (rate_limiter_ != nullptr && rate_limiter_priority_used != Env::IO_TOTAL) {
+    while (data_size > 0) {
+      size_t size;
+      size = rate_limiter_->RequestToken(data_size, buf_.Alignment(),
+                                         rate_limiter_priority_used, stats_,
+                                         RateLimiter::OpType::kWrite);
+      data_size -= size;
+    }
+  }
+
+  {
+    IOSTATS_TIMER_GUARD(write_nanos);
+    TEST_SYNC_POINT("WritableFileWriter::Flush:BeforeAppend");
+    FileOperationInfo::StartTimePoint start_ts;
+    if (ShouldNotifyListeners()) {
+      start_ts = FileOperationInfo::StartNow();
+    }
+    // direct writes must be positional
+    EncodeFixed32(checksum_buf, buffered_data_crc32c_checksum_);
+    v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+    s = writable_file_->APositionedAppend(Slice(src, left), write_offset,
+                                         io_options, v_info, nullptr, this->uptr_);
+
+    if (ShouldNotifyListeners()) {
+      auto finish_ts = std::chrono::steady_clock::now();
+      NotifyOnFileWriteFinish(write_offset, left, start_ts, finish_ts, s);
+      if (!s.ok()) {
+        NotifyOnIOError(s, FileOperationType::kPositionedAppend, file_name(),
+                        left, write_offset);
+      }
+    }
+    if (!s.ok()) {
+      // In this case, we do not change buffered_data_crc32c_checksum_ because
+      // it still aligns with the data in the buffer.
+      buf_.Size(file_advance + leftover_tail);
+      buffered_data_crc32c_checksum_ =
+          crc32c::Value(buf_.BufferStart(), buf_.CurrentSize());
+      set_seen_error();
+      return s;
+    }
+  }
+
+  IOSTATS_ADD(bytes_written, left);
+  assert((next_write_offset_ % alignment) == 0);
+  uint64_t cur_size = flushed_size_.load(std::memory_order_acquire);
+  flushed_size_.store(cur_size + left, std::memory_order_release);
+
+  if (s.ok()) {
+    // Move the tail to the beginning of the buffer
+    // This never happens during normal Append but rather during
+    // explicit call to Flush()/Sync() or Close(). Also the buffer checksum will
+    // recalculated accordingly.
+    buf_.RefitTail(file_advance, leftover_tail);
+    // Adjust the checksum value to align with the data in the buffer
+    buffered_data_crc32c_checksum_ =
+        crc32c::Value(buf_.BufferStart(), buf_.CurrentSize());
+    // This is where we start writing next time which may or not be
+    // the actual file size on disk. They match if the buffer size
+    // is a multiple of whole pages otherwise filesize_ is leftover_tail
+    // behind
+    next_write_offset_ += file_advance;
+  } else {
+    set_seen_error();
+  }
+  return s;
+}
+
+IOStatus WritableFileWriter::AWriteDirect(
+    Env::IOPriority op_rate_limiter_priority) {
+  if (seen_error()) {
+    assert(false);
+
+    return IOStatus::IOError("Writer has previous error.");
+  }
+
+  assert(use_direct_io());
+  IOStatus s;
+  const size_t alignment = buf_.Alignment();
+  assert((next_write_offset_ % alignment) == 0);
+
+  // Calculate whole page final file advance if all writes succeed
+  const size_t file_advance =
+      TruncateToPageBoundary(alignment, buf_.CurrentSize());
+
+  // Calculate the leftover tail, we write it here padded with zeros BUT we
+  // will write it again in the future either on Close() OR when the current
+  // whole page fills out.
+  const size_t leftover_tail = buf_.CurrentSize() - file_advance;
+
+  // Round up and pad
+  buf_.PadToAlignmentWith(0);
+
+  const char* src = buf_.BufferStart();
+  uint64_t write_offset = next_write_offset_;
+  size_t left = buf_.CurrentSize();
+  DataVerificationInfo v_info;
+  char checksum_buf[sizeof(uint32_t)];
+  Env::IOPriority rate_limiter_priority_used =
+      WritableFileWriter::DecideRateLimiterPriority(
+          writable_file_->GetIOPriority(), op_rate_limiter_priority);
+  IOOptions io_options;
+  io_options.rate_limiter_priority = rate_limiter_priority_used;
+
+  while (left > 0) {
+    // Check how much is allowed
+    size_t size = left;
+    if (rate_limiter_ != nullptr &&
+        rate_limiter_priority_used != Env::IO_TOTAL) {
+      size = rate_limiter_->RequestToken(left, buf_.Alignment(),
+                                         rate_limiter_priority_used, stats_,
+                                         RateLimiter::OpType::kWrite);
+    }
+
+    {
+      IOSTATS_TIMER_GUARD(write_nanos);
+      TEST_SYNC_POINT("WritableFileWriter::Flush:BeforeAppend");
+      FileOperationInfo::StartTimePoint start_ts;
+      if (ShouldNotifyListeners()) {
+        start_ts = FileOperationInfo::StartNow();
+      }
+      // direct writes must be positional
+      if (perform_data_verification_) {
+        Crc32cHandoffChecksumCalculation(src, size, checksum_buf);
+        v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+        if(urings.init)
+          s = writable_file_->APositionedAppend(Slice(src, size), write_offset,
+                                             io_options, v_info, nullptr, this->uptr_);
+        else
+          s = writable_file_->PositionedAppend(Slice(src, size), write_offset,
+                                             io_options, v_info, nullptr);
+      } else {
+        // Async point
+        if(urings.init)
+          s = writable_file_->APositionedAppend(Slice(src, size), write_offset,
+                                             io_options, nullptr, this->uptr_);
+        else
+          s = writable_file_->PositionedAppend(Slice(src, size), write_offset,
+                                             io_options, nullptr);
+      }
+
+      if (ShouldNotifyListeners()) {
+        auto finish_ts = std::chrono::steady_clock::now();
+        NotifyOnFileWriteFinish(write_offset, size, start_ts, finish_ts, s);
+        if (!s.ok()) {
+          NotifyOnIOError(s, FileOperationType::kPositionedAppend, file_name(),
+                          size, write_offset);
+        }
+      }
+      if (!s.ok()) {
+        buf_.Size(file_advance + leftover_tail);
+        set_seen_error();
+        return s;
+      }
+    }
+
+    IOSTATS_ADD(bytes_written, size);
+    left -= size;
+    src += size;
+    write_offset += size;
+    uint64_t cur_size = flushed_size_.load(std::memory_order_acquire);
+    flushed_size_.store(cur_size + size, std::memory_order_release);
+    assert((next_write_offset_ % alignment) == 0);
+  }
+
+  if (s.ok()) {
+    // Move the tail to the beginning of the buffer
+    // This never happens during normal Append but rather during
+    // explicit call to Flush()/Sync() or Close()
+    buf_.RefitTail(file_advance, leftover_tail);
     // This is where we start writing next time which may or not be
     // the actual file size on disk. They match if the buffer size
     // is a multiple of whole pages otherwise filesize_ is leftover_tail

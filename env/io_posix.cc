@@ -57,10 +57,10 @@ extern std::atomic<int> uring_counter;
 bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint16_t log_depth)
 {
   int init_lib = true;
-  this->compaction_queue_size = compaction_num;
-  this->log_queue_size = log_num;
+  this->log_queue_size = 0;
   this->compaction_queue_depth = compaction_depth;
   this->log_queue_depth = log_depth;
+  this->compaction_queue_size = 0;
   this->compaction_urings = new struct uring_queue* [compaction_num];
   this->log_urings = new struct uring_queue* [log_num]; 
   for(uint16_t i = 0; i < compaction_num; ++i)
@@ -78,6 +78,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
       init_lib = false;
       break;
     }
+    this->compaction_queue_size += 1;
     compaction_urings[i] = qptr;
     //compaction_urings->push(std::move(qptr));
   }
@@ -101,6 +102,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
       init_lib = false;
       break;
     }
+    this->log_queue_size += 1;
     log_urings[i] = qptr;
   }
   if(!init_lib)
@@ -1551,6 +1553,38 @@ IOStatus PosixWritableFile::PositionedAppend(const Slice& data, uint64_t offset,
   return IOStatus::OK();
 }
 
+IOStatus PosixWritableFile::APositionedAppend(const Slice& data, uint64_t offset,
+                                             const IOOptions& /**/opts,
+                                             IODebugContext* dbg/**/, uring_queue* uptr) {
+  // run db_bench --compression_type=none --benchmarks=fillrandom --value_size=4096 --num=10000000 --use_direct_io_for_flush_and_compaction=true
+  if (use_direct_io()) {
+    assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
+    assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
+    assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
+  }
+  assert(offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()));
+  const char* src = data.data();
+  size_t nbytes = data.size();
+  struct io_uring *uq = &uptr->uring;
+  struct io_uring_sqe* sqe = io_uring_get_sqe(uq);
+  void* data_copy = (char *) aligned_alloc(4096, nbytes);
+  memcpy(data_copy, src, nbytes);
+  if(sqe == nullptr)
+  {
+    printf("No more sqe available for APositionedAppend !\n");
+  }
+  uptr->prep_write_count += 1;
+  io_uring_prep_write(sqe, fd_, data_copy, nbytes, static_cast<off_t>(offset));
+  // Set data after prep.
+  io_uring_sqe_set_data(sqe, data_copy);
+
+  filesize_ = offset + nbytes;
+  // printf("offset: %ld, filesize: %ld", offset, filesize_);
+  // No need to submit, submit when afsync is called. lseek has no use.
+  lseek(fd_, offset, SEEK_SET);
+  return IOStatus::OK();
+}
+
 IOStatus PosixWritableFile::Truncate(uint64_t size, const IOOptions& /*opts*/,
                                      IODebugContext* /*dbg*/) {
   IOStatus s;
@@ -1708,7 +1742,7 @@ IOStatus PosixWritableFile::ASync(const IOOptions& /*opts*/,
 IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
                                   IODebugContext* /*dbg*/, struct uring_queue* uptr)
 {
-  if(uptr == nullptr)
+  /*if(uptr == nullptr)
   {
     printf("No more uq_t available for fsync !\n");
   }
@@ -1723,7 +1757,7 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
   // Lei Todo: this place should act like fsync, which means no flag IORING_FSYNC_DATASYNC.
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
 
-  // Record all fds should close afterwards.
+  // Record all fds should close afterwards.*/
   uptr->fds.push_back(fd_);
 
 

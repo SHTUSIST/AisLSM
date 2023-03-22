@@ -1422,7 +1422,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   uptr->write_count = 0;
 
   //prep and submit sync 
-  int fd_;
+  int fd_ = 0;
   struct io_uring_sqe* sqe;
   for(size_t i = 0; i < uptr->fds.size(); ++i)
   { 
@@ -1434,13 +1434,13 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
       uptr->sync_count += 1;
   }
-  
-
-  if(io_uring_submit(&uptr->uring) <= 0)
+  int submission_count = io_uring_submit(&uptr->uring);
+  if(submission_count <= 0) // != uptr->sync_count
   {
-    printf("Submition failed of fsync !\n");
+    printf("Submission failed of fsync !\n");
   }
-
+  else 
+    uptr->sync_count = submission_count;
 
   sub_compact->compaction_job_stats.cpu_micros =
       db_options_.clock->CPUMicros() - prev_cpu_micros;

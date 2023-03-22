@@ -349,6 +349,8 @@ class WritableFileWriter {
 #ifndef ROCKSDB_LITE
   IOStatus WriteDirect(Env::IOPriority op_rate_limiter_priority);
   IOStatus WriteDirectWithChecksum(Env::IOPriority op_rate_limiter_priority);
+  IOStatus AWriteDirect(Env::IOPriority op_rate_limiter_priority);
+  IOStatus AWriteDirectWithChecksum(Env::IOPriority op_rate_limiter_priority);
 #endif  // !ROCKSDB_LITE
   // Normal write.
   IOStatus WriteBuffered(const char* data, size_t size,

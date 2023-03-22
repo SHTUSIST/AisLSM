@@ -1034,7 +1034,19 @@ class FSWritableFile {
       IODebugContext* /*dbg*/) {
     return IOStatus::NotSupported("PositionedAppend");
   }
-
+    virtual IOStatus APositionedAppend(
+      const Slice& /* data */, uint64_t /* offset */,
+      const IOOptions& /*options*/,
+      const DataVerificationInfo& /* verification_info */,
+      IODebugContext* /*dbg*/, uring_queue* uptr) {
+    return IOStatus::NotSupported("APositionedAppend");
+  }
+  virtual IOStatus APositionedAppend(const Slice& /* data */,
+                                    uint64_t /* offset */,
+                                    const IOOptions& /*options*/,
+                                    IODebugContext* /*dbg*/, uring_queue* uptr) {
+    return IOStatus::NotSupported("PositionedAppend");
+  }
   // Truncate is necessary to trim the file to the correct size
   // before closing. It is not always possible to keep track of the file
   // size due to whole pages writes. The behavior is undefined if called
