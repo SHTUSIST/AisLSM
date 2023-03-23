@@ -65,7 +65,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
     //Lei modified: Here subcompaction sync and output.
     //printf("ASync: Compaction\n");
     // zl modified: 
-    io_s = file_writer_->ASync(use_fsync, uptr);
+    io_s = file_writer_->ASync(use_fsync);
     // io_s = file_writer_->Sync(use_fsync);
   }
   if (input_status.ok() && io_s.ok()) {

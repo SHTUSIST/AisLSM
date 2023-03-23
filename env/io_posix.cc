@@ -123,13 +123,14 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    if (counter_for_while > 64)
+    if (counter_for_while > 8)
     {
+      printf("so sad!\n");
       this->wait_for_sync_sst(uptr);
       break;
     }
     counter_for_while += 1;
-    index = (id+counter_for_while) %(this->compaction_queue_size);
+    index = (id + counter_for_while) % (this->compaction_queue_size);
     uptr = this->compaction_urings[index];
   }
   uptr->running.store(true);
@@ -139,16 +140,16 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
 
 void Urings::clear_all(uring_type queue_type)
 {
+  if(!this->init)
+    return;
   switch(queue_type)
   {
     case uring_type::uring_compaction_type:
       for(int i = 0; i < this->compaction_queue_size; ++i)
       {
-        /*while(this->compaction_urings[i]->running)
-        {
-
-        }*/
         struct uring_queue* uptr = this->compaction_urings[i];
+        if(uptr->running)
+          this->wait_for_sync_sst(uptr);
         io_uring_queue_exit(&(this->compaction_urings[i]->uring));
       }
       delete this->compaction_urings;
@@ -169,9 +170,66 @@ void Urings::clear_all(uring_type queue_type)
     default:
       break;
   }
+  this->init = false;
+}
+struct uring_queue* Urings::submit_write_sst(struct uring_queue* uptr)
+{
+  int ret = io_uring_submit(&uptr->uring);
+  if (ret != uptr->prep_write_count)
+    printf("write submission fails!\n");
+  uptr->write_count += uptr->prep_write_count;
+  uptr->prep_write_count = 0;
+  return uptr;
 }
 
+struct uring_queue* Urings::submit_fsync_sst(struct uring_queue* uptr)
+{
+  struct io_uring *uq = &uptr->uring;
+  struct io_uring_sqe* sqe;
+  for(size_t i = 0; i < uptr->fds.size(); ++i)
+  {
+    sqe = io_uring_get_sqe(uq);
+    if(sqe == nullptr)
+    {
+      printf("No more sqe available for fsync !\n");
+    }
+    io_uring_prep_fsync(sqe, uptr->fds[i], IORING_FSYNC_DATASYNC);
+    uptr->sync_count += 1;
+  }
+  int submission_count = io_uring_submit(&uptr->uring);
+  if(submission_count != uptr->sync_count) // != uptr->sync_count
+  {
+    printf("Submission failed of fsync !\n");
+  }
+  return uptr;
+}
 
+struct uring_queue* Urings::wait_for_write_sst(struct uring_queue* uptr)
+{
+  // wait write with prep_write_count times
+  void* data;
+  struct io_uring_cqe* cqe;
+  struct io_uring *uq = &uptr->uring;
+
+  for(uint16_t i = 0; i < uptr->write_count; ++i)
+  {
+    int ret = io_uring_wait_cqe(uq, &cqe);
+    if(ret < 0)
+    {
+      printf("invalid waiting cqe\n");
+    }
+    data = io_uring_cqe_get_data(cqe);
+
+    // Only free data for aappend. 
+    if(data != nullptr)
+      free(data);
+    io_uring_cqe_seen(uq, cqe);
+  }
+
+  // uptr->prep_write_count = 0;
+  uptr->write_count = 0;
+  return uptr;
+}
 
 /* Wait for count times, data will reset to nullptr, need to store it before. */
 struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)

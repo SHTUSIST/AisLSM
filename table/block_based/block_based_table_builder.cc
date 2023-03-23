@@ -57,6 +57,7 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern Urings urings;
 extern const std::string kHashIndexPrefixesBlock;
 extern const std::string kHashIndexPrefixesMetadataBlock;
 
@@ -1821,15 +1822,9 @@ void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
   else
   {
     ios = r->file->Awrite_footer_append(footer.GetSlice());
-    int ret = io_uring_submit(&r->file->uptr_->uring);
-    // printf("\n\nret: %d %d %d \n\n", r->file->uptr_->prep_write_count, ret, r->file->uptr_->write_count);
-    if(ret != r->file->uptr_->prep_write_count)
-      printf("write submission fails!\n");
-    r->file->uptr_->write_count += r->file->uptr_->prep_write_count;
-    r->file->uptr_->prep_write_count = 0;
+    // async point submit 
+    
 
-    // If want to add flag on footer, this should have a flag.
-  //  r->file->uptr_->flag = true;
   }
   if (ios.ok()) {
     r->set_offset(r->get_offset() + footer.GetSlice().size());
