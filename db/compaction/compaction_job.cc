@@ -1395,52 +1395,12 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     sub_compact->Current().UpdateBlobStats();
   }
 
-
-    //huyp: wait write with prep_write_count times and submit sync request sync_count times
+  //huyp: wait write with prep_write_count times and submit sync request sync_count times
   struct uring_queue* uptr = compact_->compaction->uptr;
-
-  // wait write with prep_write_count times
-  void* data;
-  struct io_uring_cqe* cqe;
-  struct io_uring *uq = &uptr->uring;
-
-  for(uint16_t i = 0; i < uptr->write_count; ++i)
-  {
-    int ret = io_uring_wait_cqe(uq, &cqe);
-    if(ret < 0)
-    {
-      printf("invalid waiting cqe\n");
-    }
-    data = io_uring_cqe_get_data(cqe);
-
-    // Only free data for aappend. 
-    if(data != nullptr)
-      free(data);
-    io_uring_cqe_seen(uq, cqe);
-  }
-  uptr->prep_write_count = 0;
-  uptr->write_count = 0;
+  urings.wait_for_write_sst(uptr);
 
   //prep and submit sync 
-  int fd_ = 0;
-  struct io_uring_sqe* sqe;
-  for(size_t i = 0; i < uptr->fds.size(); ++i)
-  { 
-    sqe = io_uring_get_sqe(uq);
-    if(sqe == nullptr)
-    {
-      printf("No more sqe available for fsync !\n");
-    }
-    io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
-      uptr->sync_count += 1;
-  }
-  int submission_count = io_uring_submit(&uptr->uring);
-  if(submission_count <= 0) // != uptr->sync_count
-  {
-    printf("Submission failed of fsync !\n");
-  }
-  else 
-    uptr->sync_count = submission_count;
+  urings.submit_fsync_sst(uptr);
 
   sub_compact->compaction_job_stats.cpu_micros =
       db_options_.clock->CPUMicros() - prev_cpu_micros;

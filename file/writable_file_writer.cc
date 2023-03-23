@@ -555,8 +555,12 @@ IOStatus WritableFileWriter::AClose() {
   // Async point?
   // The problem is that it should submit earlier. 
   // Now give async a try.
-  // s = AsyncFlush();
-  s = Flush();  // flush cache to OS
+  // printf("hi1!\n");
+  s = AsyncFlush();
+  // async point close
+  // s = Flush();  // flush cache to OS
+  urings.submit_write_sst(this->uptr_);
+  // urings.wait_for_write_sst(this->uptr_);
 
   IOStatus interim;
   IOOptions io_options;
@@ -1032,7 +1036,7 @@ IOStatus WritableFileWriter::Sync(bool use_fsync) {
 }
 
 // Lei modified: ASync in WritableFileWriter
-IOStatus WritableFileWriter::ASync(bool use_fsync, struct uring_queue* uptr) {
+IOStatus WritableFileWriter::ASync(bool use_fsync) {
   if (seen_error()) {
     return AssertFalseAndGetStatusForPrevError();
   }
@@ -1049,7 +1053,7 @@ IOStatus WritableFileWriter::ASync(bool use_fsync, struct uring_queue* uptr) {
   }
   TEST_KILL_RANDOM("WritableFileWriter::Sync:0");
   if (!use_direct_io() && pending_sync_) {
-    s = ASyncInternal(use_fsync, uptr);
+    s = ASyncInternal(use_fsync);
     if (!s.ok()) {
       set_seen_error();
       return s;
@@ -1131,7 +1135,8 @@ IOStatus WritableFileWriter::WaitASyncSST(struct uring_queue* uptr)
   return s;
 }
 // Lei modified: ASyncInternal in WritableFileWriter
-IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* uptr) {
+IOStatus WritableFileWriter::ASyncInternal(bool use_fsync) {
+  
   // Caller is supposed to check seen_error_
   IOStatus s;
   IOSTATS_TIMER_GUARD(fsync_nanos);
@@ -1153,7 +1158,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
   {
     if(urings.init)
     {
-      s = writable_file_->AFsync(io_options, nullptr, uptr);
+      s = writable_file_->AFsync(io_options, nullptr, this->uptr_);
     }
     else
     {
@@ -1165,7 +1170,7 @@ IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* u
     if(urings.init)
     {
       //huyp:modify bug
-      s = writable_file_->ASync(io_options, nullptr, uptr);
+      s = writable_file_->ASync(io_options, nullptr, this->uptr_);
     }
     else
     {

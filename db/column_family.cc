@@ -42,6 +42,7 @@
 #include "util/compression.h"
 
 namespace ROCKSDB_NAMESPACE {
+extern Urings urings;
 
 ColumnFamilyHandleImpl::ColumnFamilyHandleImpl(
     ColumnFamilyData* column_family_data, DBImpl* db, InstrumentedMutex* mutex)
@@ -661,6 +662,7 @@ ColumnFamilyData::ColumnFamilyData(
 
 // DB mutex held
 ColumnFamilyData::~ColumnFamilyData() {
+  urings.clear_all(uring_type::uring_compaction_type);
   assert(refs_.load(std::memory_order_relaxed) == 0);
   // remove from linked list
   auto prev = prev_;

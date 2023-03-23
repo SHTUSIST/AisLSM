@@ -282,7 +282,7 @@ class WritableFileWriter {
   IOStatus Sync(bool use_fsync);
 
   // Lei modified: Async declare
-  IOStatus ASync(bool use_fsync, struct uring_queue* uptr);
+  IOStatus ASync(bool use_fsync);
 
   IOStatus WaitASyncSST(struct uring_queue* uptr);
 
@@ -366,6 +366,6 @@ class WritableFileWriter {
   IOStatus RangeSync(uint64_t offset, uint64_t nbytes);
   IOStatus SyncInternal(bool use_fsync);
   // Lei modified: ASyncInternal declare
-  IOStatus ASyncInternal(bool use_fsync, struct uring_queue* uptr);
+  IOStatus ASyncInternal(bool use_fsync);
 };
 }  // namespace ROCKSDB_NAMESPACE
