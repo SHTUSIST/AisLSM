@@ -1678,11 +1678,11 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
       // remount /nvme device
       if (! db_options.nvme_mount_point.empty()) {
-        std::cout << db_options.nvme_mount_point <<std::endl;
 
-        const char * mount_path= (std::string("mount /dev/nvme1n1 ") +db_options.nvme_mount_point).c_str();
+        const char * temp_mount_command= "mount /dev/nvme1n1 ";
+        std::string temp  = std::string(temp_mount_command) + db_options.nvme_mount_point;
+        const char *  mount_path= temp.c_str();
 
-        std::cout << mount_path <<std::endl;
         status = system(mount_path);
         if (status == -1) {
           printf("Failed to mount!\n");
@@ -1694,9 +1694,11 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
     }
 
+    // To avoid repeatedly mount and umount
+    db_options.enable_nvme_iopoll = false;
+
     /* Init all queues */
     urings.init_queues(256,2,16384,2,flag_nvme_iopll);
-
 
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
