@@ -85,7 +85,7 @@ class Urings{
     struct uring_queue* wait_for_write_sst(struct uring_queue* uptr,int wait_number);
     struct uring_queue* get_empty_element(uint32_t id);
     struct uring_queue* wait_for_sync_sst(struct uring_queue* uptr);
-    bool init_queues(uint16_t compaction_num = 256, uint8_t log_num = 8, uint16_t compaction_depth = 64, uint16_t log_depth = 64);
+    bool init_queues(uint16_t compaction_num = 256, uint8_t log_num = 8, uint16_t compaction_depth = 64, uint16_t log_depth = 64,int flag_nvme_iopoll=0);
     struct uring_queue** log_urings = nullptr;
     bool init = false;
   private: 

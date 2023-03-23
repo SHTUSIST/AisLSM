@@ -42,6 +42,7 @@
 #include "util/string_util.h"
 #include "rocksdb/file_system.h"
 #include "db/version_set.h"
+#include "rocksdb/options.h"
 
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
@@ -54,7 +55,7 @@ extern Urings urings;
 extern std::atomic<int> uring_counter;
 
 //zl: Add some functions 
-bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint16_t log_depth)
+bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t compaction_depth, uint16_t log_depth,int flag_nvme_iopoll)
 {
   int init_lib = true;
   this->log_queue_size = 0;
@@ -63,6 +64,8 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   this->compaction_queue_size = 0;
   this->compaction_urings = new struct uring_queue* [compaction_num];
   this->log_urings = new struct uring_queue* [log_num]; 
+
+  
   for(uint16_t i = 0; i < compaction_num; ++i)
   {
     struct uring_queue* qptr;
@@ -73,7 +76,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr->prep_write_count = 0;
     qptr->write_count = 0;
     qptr->sync_count = 0;
-    if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), 1) != 0)
+    if(io_uring_queue_init(this->compaction_queue_depth, &(qptr->uring), flag_nvme_iopoll) != 0)
     {
       init_lib = false;
       break;
@@ -97,7 +100,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     qptr->prep_write_count = 0;
     qptr->sync_count = 0;
     qptr->id = i;
-    if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 1) != 0)
+    if(io_uring_queue_init(this->log_queue_depth, &(qptr->uring), 0) != 0)
     {
       init_lib = false;
       break;

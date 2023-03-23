@@ -30,6 +30,7 @@
 #include <liburing.h>
 #include <queue>
 #include "liburing.h"
+#include "rocksdb/options.h"
 namespace ROCKSDB_NAMESPACE {
 
 // The global urings.
@@ -1642,10 +1643,61 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   // zl: Initialization, initialize the uring only when it should be used and not init.
   // LIBURING_USE now is #define LIBURING_USE true, future it should be made as a option. 
 
+  int flag_nvme_iopll = 0;
   if(LIBURING_USE && !urings.init)
   {
+    // huyp: add support for nvme io_poll
+    if (db_options.enable_nvme_iopoll){
+      db_options.use_direct_io_for_flush_and_compaction=true;
+      int status;
+
+      //unmount nvme device to enable io poll
+      if (! db_options.nvme_mount_point.empty()) {
+        const char * unmount_path= ("umount " + db_options.nvme_mount_point).c_str();
+        status = system(unmount_path);
+        if (status == -1) {
+          printf("Failed to umount!\n");
+        }
+        else{
+          printf("Successfully  umount nvme path!\n");
+        }
+      }
+
+      //enable io poll
+      status = system("modprobe -r nvme && modprobe nvme poll_queues=1");
+      if (status == -1) {
+          printf("Failed to execute io_poll for nvme. Please run as sudo. Make sure you have nvme device and nvme driver module in kernel.  \n");
+          printf("If you have mount any nvme devices with filesystems, you should also umount them before running program \n");
+          printf("Contine with normal interrupt io_uring mode rather io_poll mode \n");
+          db_options.enable_nvme_iopoll=false;
+      } else {
+          printf("Command for io_poll executed successfully.\n");
+          flag_nvme_iopll = 1;
+      }
+
+
+      // remount /nvme device
+      if (! db_options.nvme_mount_point.empty()) {
+        std::cout << db_options.nvme_mount_point <<std::endl;
+
+        const char * mount_path= (std::string("mount /dev/nvme1n1 ") +db_options.nvme_mount_point).c_str();
+
+        std::cout << mount_path <<std::endl;
+        status = system(mount_path);
+        if (status == -1) {
+          printf("Failed to mount!\n");
+        }
+        else{
+          printf("Successfully  mount nvme path!\n");
+        }
+      }
+
+    }
+
     /* Init all queues */
-    urings.init_queues(256,2,16384,2);
+    urings.init_queues(256,2,16384,2,flag_nvme_iopll);
+
+
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {

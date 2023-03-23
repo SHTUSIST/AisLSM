@@ -887,6 +887,14 @@ struct DBOptions {
   // Default: 1MB
   size_t stats_history_buffer_size = 1024 * 1024;
 
+
+  // if true, io_poll will be enabled for io_uring and automatically set O_DIRECT for flush and bg_compaction
+  // This option is designed to reduce I/O latency for nvme device.
+  bool enable_nvme_iopoll = false;
+
+  // To enable nvme iopoll, user must  umount nvme  device before
+  std::string nvme_mount_point ="";
+
   // If set true, will hint the underlying file system that the file
   // access pattern is random, when a sst file is opened.
   // Default: true

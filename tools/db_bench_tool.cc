@@ -1572,6 +1572,13 @@ DEFINE_bool(use_direct_io_for_flush_and_compaction,
             ROCKSDB_NAMESPACE::Options().use_direct_io_for_flush_and_compaction,
             "Use O_DIRECT for background flush and compaction writes");
 
+DEFINE_bool(enable_nvme_iopoll,
+            ROCKSDB_NAMESPACE::Options().enable_nvme_iopoll,
+            "Enable nvme io_poll for Use O_DIRECT of background flush and compaction writes");
+
+DEFINE_string(nvme_mount_point, "",
+              "To enable nvme iopoll, user must  umount nvme  device before");
+
 DEFINE_bool(advise_random_on_open,
             ROCKSDB_NAMESPACE::Options().advise_random_on_open,
             "Advise random access on table file open");
@@ -4166,6 +4173,10 @@ class Benchmark {
     options.use_direct_reads = FLAGS_use_direct_reads;
     options.use_direct_io_for_flush_and_compaction =
         FLAGS_use_direct_io_for_flush_and_compaction;
+    options.enable_nvme_iopoll = 
+        FLAGS_enable_nvme_iopoll;
+    options.nvme_mount_point = 
+        FLAGS_nvme_mount_point;
     options.manual_wal_flush = FLAGS_manual_wal_flush;
     options.wal_compression = FLAGS_wal_compression_e;
 #ifndef ROCKSDB_LITE
