@@ -91,6 +91,8 @@ class Urings{
     struct uring_queue** log_urings = nullptr;
     bool init = false;
     void clear_all(uring_type queue_type);
+    bool nvme_iopoll = false;
+
   private: 
     uint16_t get_id(uint16_t num, uint16_t mask);
 
@@ -104,7 +106,7 @@ class Urings{
     uint16_t log_queue_size = 0;
     uint16_t compaction_queue_depth = 0;
     uint16_t log_queue_depth = 0;
-    bool bit;
+
 };
 
 std::string IOErrorMsg(const std::string& context,

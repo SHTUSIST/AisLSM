@@ -2672,6 +2672,10 @@ class DBImpl : public DB {
   bool wal_in_db_path_;
   std::atomic<uint64_t> max_total_wal_size_;
 
+  // io_poll for nvme or not
+  bool enable_nvme_iopoll;
+  std::string nvme_mount_point;
+
   BlobFileCompletionCallback blob_callback_;
 
   // Pointer to WriteBufferManager stalling interface.
@@ -2680,6 +2684,9 @@ class DBImpl : public DB {
   // seqno_time_mapping_ stores the sequence number to time mapping, it's not
   // thread safe, both read and write need db mutex hold.
   SeqnoToTimeMapping seqno_time_mapping_;
+
+
+
 };
 
 class GetWithTimestampReadCallback : public ReadCallback {

@@ -245,6 +245,12 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       own_sfm_(options.sst_file_manager == nullptr),
       closed_(false),
       atomic_flush_install_cv_(&mutex_),
+
+      // nvme io_poll options for closing db and restore iopoll queues
+      enable_nvme_iopoll(options.enable_nvme_iopoll),
+      nvme_mount_point(options.nvme_mount_point),
+
+
       blob_callback_(immutable_db_options_.sst_file_manager.get(), &mutex_,
                      &error_handler_, &event_logger_,
                      immutable_db_options_.listeners, dbname_) {

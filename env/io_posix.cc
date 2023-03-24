@@ -64,6 +64,7 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   this->compaction_queue_size = 0;
   this->compaction_urings = new struct uring_queue* [compaction_num];
   this->log_urings = new struct uring_queue* [log_num]; 
+  this->nvme_iopoll = flag_nvme_iopoll;
 
   
   for(uint16_t i = 0; i < compaction_num; ++i)
@@ -186,6 +187,7 @@ struct uring_queue* Urings::submit_fsync_sst(struct uring_queue* uptr)
 {
   struct io_uring *uq = &uptr->uring;
   struct io_uring_sqe* sqe;
+  int submission_count;
   for(size_t i = 0; i < uptr->fds.size(); ++i)
   {
     sqe = io_uring_get_sqe(uq);
@@ -194,13 +196,15 @@ struct uring_queue* Urings::submit_fsync_sst(struct uring_queue* uptr)
       printf("No more sqe available for fsync !\n");
     }
     io_uring_prep_fsync(sqe, uptr->fds[i], IORING_FSYNC_DATASYNC);
+
+    submission_count = io_uring_submit(&uptr->uring);
+    if(UNLIKELY(submission_count != 1)) // != uptr->sync_count
+    {
+      printf("Submission failed of fsync !\n");
+    }
     uptr->sync_count += 1;
   }
-  int submission_count = io_uring_submit(&uptr->uring);
-  if(submission_count != uptr->sync_count) // != uptr->sync_count
-  {
-    printf("Submission failed of fsync !\n");
-  }
+
   return uptr;
 }
 

@@ -1688,14 +1688,13 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
           printf("Failed to mount!\n");
         }
         else{
-          printf("Successfully  mount nvme path!\n");
+          printf("Successfully  remount nvme path!\n");
         }
       }
 
     }
 
-    // To avoid repeatedly mount and umount
-    db_options.enable_nvme_iopoll = false;
+
 
     /* Init all queues */
     urings.init_queues(256,2,16384,2,flag_nvme_iopll);
