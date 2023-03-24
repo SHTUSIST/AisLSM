@@ -1308,6 +1308,9 @@ class DBImpl : public DB {
   // Additonal options for compaction and flush
   FileOptions file_options_for_compaction_;
 
+  // zl: Additional options for flush. 
+  FileOptions file_options_for_flush_;
+
   std::unique_ptr<ColumnFamilyMemTablesImpl> column_family_memtables_;
 
   // Increase the sequence number after writing each batch, whether memtable is

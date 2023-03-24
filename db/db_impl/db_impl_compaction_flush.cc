@@ -213,7 +213,7 @@ Status DBImpl::FlushMemTableToOutputFile(
 
   FlushJob flush_job(
       dbname_, cfd, immutable_db_options_, mutable_cf_options, max_memtable_id,
-      file_options_for_compaction_, versions_.get(), &mutex_, &shutting_down_,
+      file_options_for_flush_, versions_.get(), &mutex_, &shutting_down_,
       snapshot_seqs, earliest_write_conflict_snapshot, snapshot_checker,
       job_context, log_buffer, directories_.GetDbDir(), GetDataDir(cfd, 0U),
       GetCompressionFlush(*cfd->ioptions(), mutable_cf_options), stats_,
@@ -461,7 +461,7 @@ Status DBImpl::AtomicFlushMemTablesToOutputFiles(
     uint64_t max_memtable_id = bg_flush_args[i].max_memtable_id_;
     jobs.emplace_back(new FlushJob(
         dbname_, cfd, immutable_db_options_, mutable_cf_options,
-        max_memtable_id, file_options_for_compaction_, versions_.get(), &mutex_,
+        max_memtable_id, file_options_for_flush_, versions_.get(), &mutex_,
         &shutting_down_, snapshot_seqs, earliest_write_conflict_snapshot,
         snapshot_checker, job_context, log_buffer, directories_.GetDbDir(),
         data_dir, GetCompressionFlush(*cfd->ioptions(), mutable_cf_options),

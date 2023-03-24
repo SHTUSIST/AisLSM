@@ -179,6 +179,8 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       file_options_(BuildDBOptions(immutable_db_options_, mutable_db_options_)),
       file_options_for_compaction_(fs_->OptimizeForCompactionTableWrite(
           file_options_, immutable_db_options_)),
+      file_options_for_flush_(fs_->OptimizeForCompactionTableWrite(
+          file_options_, immutable_db_options_)),
       seq_per_batch_(seq_per_batch),
       batch_per_txn_(batch_per_txn),
       next_job_id_(1),
@@ -249,15 +251,15 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       // nvme io_poll options for closing db and restore iopoll queues
       enable_nvme_iopoll(options.enable_nvme_iopoll),
       nvme_mount_point(options.nvme_mount_point),
-
-
       blob_callback_(immutable_db_options_.sst_file_manager.get(), &mutex_,
                      &error_handler_, &event_logger_,
                      immutable_db_options_.listeners, dbname_) {
   // !batch_per_trx_ implies seq_per_batch_ because it is only unset for
   // WriteUnprepared, which should use seq_per_batch_.
   assert(batch_per_txn_ || seq_per_batch_);
-
+  if(enable_nvme_iopoll)
+    file_options_for_flush_.use_direct_writes = false;
+      // file_options_for_flush init 
   // Reserve ten files or so for other uses and give the rest to TableCache.
   // Give a large number for setting of "infinite" open files.
   const int table_cache_size = (mutable_db_options_.max_open_files == -1)
@@ -1373,6 +1375,8 @@ Status DBImpl::SetDBOptions(
           file_options_for_compaction_, immutable_db_options_);
       file_options_for_compaction_.compaction_readahead_size =
           mutable_db_options_.compaction_readahead_size;
+      
+      printf("set db options\n");
       WriteThread::Writer w;
       write_thread_.EnterUnbatched(&w, &mutex_);
       if (total_log_size_ > GetMaxTotalWalSize() || wal_changed) {
