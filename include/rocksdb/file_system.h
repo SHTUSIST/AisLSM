@@ -1035,9 +1035,7 @@ class FSWritableFile {
   }
   virtual IOStatus Close(const IOOptions& /*options*/,
                          IODebugContext* /*dbg*/) = 0;
-  virtual IOStatus AClose(const IOOptions& opts, IODebugContext* dbg){
-    return IOStatus::OK();
-  }
+
 
   virtual IOStatus Flush(const IOOptions& options, IODebugContext* dbg) = 0;
   virtual IOStatus Sync(const IOOptions& options,

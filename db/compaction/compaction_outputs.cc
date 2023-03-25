@@ -69,7 +69,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
     //io_s = file_writer_->Sync(use_fsync);
   }
   if (input_status.ok() && io_s.ok()) {
-    io_s = file_writer_->AClose();
+    io_s = file_writer_->Close();
   }
 
   if (input_status.ok() && io_s.ok()) {
