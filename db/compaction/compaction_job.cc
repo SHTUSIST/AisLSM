@@ -628,7 +628,8 @@ Status CompactionJob::Run() {
   compaction->uptr = uptr;
   uptr->data = static_cast<void*>(compaction->input_version());
   // Each compaction job ref once.
-  compaction->input_version()->Ref();  
+  // Lei modified: "Ref" and "Unref" used for async
+  compaction->input_version()->ASyncRef();  
 
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();

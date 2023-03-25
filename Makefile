@@ -550,7 +550,7 @@ endif
 default: all
 
 WARNING_FLAGS = -W -Wextra -Wall -Wsign-compare -Wshadow \
-  -Wunused-parameter
+  -Wno-unused-parameter -Wno-unused-variable
 
 ifeq (,$(filter amd64, $(MACHINE)))
 	C_WARNING_FLAGS = -Wstrict-prototypes
