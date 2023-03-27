@@ -4001,6 +4001,23 @@ void Version::PartDestruct(){
   next_->prev_ = prev_;
   next_=this;
   prev_=this;
+
+
+    // Drop references to files
+  for (int level = 0; level < storage_info_.num_levels_; level++) {
+    for (size_t i = 0; i < storage_info_.files_[level].size(); i++) {
+      FileMetaData* f = storage_info_.files_[level][i];
+      assert(f->refs > 0);
+      if (f->refs == 1) {
+        if (f->table_reader_handle) {
+          vset_->table_cache_->Release(f->table_reader_handle);
+          TableCache::Evict(vset_->table_cache_, f->fd.GetNumber());
+          f->table_reader_handle=nullptr;
+        }
+      }
+    }
+  }
+
 }
 
 bool VersionStorageInfo::OverlapInLevel(int level,
