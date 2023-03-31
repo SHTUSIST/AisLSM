@@ -60,6 +60,7 @@ struct uring_queue{
   uint8_t ref = 0;
   uint32_t job_id;
   uint16_t id;
+  std::vector<int> fds;
 };
 enum uring_type;
 class Urings{
@@ -424,6 +425,7 @@ class PosixWritableFile : public FSWritableFile {
   virtual IOStatus ASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
   virtual IOStatus AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
   virtual IOStatus WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr) override;
+  virtual IOStatus AClose(const IOOptions& opts, IODebugContext* dbg) override;
 
   virtual bool IsSyncThreadSafe() const override;
   virtual bool use_direct_io() const override { return use_direct_io_; }
@@ -506,6 +508,7 @@ class PosixMmapFile : public FSWritableFile {
     return IOStatus::OK();
   }
   virtual IOStatus Close(const IOOptions& opts, IODebugContext* dbg) override;
+  virtual IOStatus AClose(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
                           IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,

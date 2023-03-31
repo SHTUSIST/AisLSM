@@ -217,6 +217,125 @@ IOStatus WritableFileWriter::Pad(const size_t pad_bytes,
   return IOStatus::OK();
 }
 
+IOStatus WritableFileWriter::AClose() {
+  if (seen_error()) {
+    IOStatus interim;
+    if (writable_file_.get() != nullptr) {
+      // not in?
+      interim = writable_file_->Close(IOOptions(), nullptr);
+      writable_file_.reset();
+    }
+    if (interim.ok()) {
+      return IOStatus::IOError(
+          "File is closed but data not flushed as writer has previous error.");
+    } else {
+      return interim;
+    }
+  }
+
+  // Do not quit immediately on failure the file MUST be closed
+
+  // Possible to close it twice now as we MUST close
+  // in __dtor, simply flushing is not enough
+  // Windows when pre-allocating does not fill with zeros
+  // also with unbuffered access we also set the end of data.
+  if (writable_file_.get() == nullptr) {
+    return IOStatus::OK();
+  }
+
+  IOStatus s;
+  s = Flush();  // flush cache to OS
+
+  IOStatus interim;
+  IOOptions io_options;
+  io_options.rate_limiter_priority = writable_file_->GetIOPriority();
+  // In direct I/O mode we write whole pages so
+  // we need to let the file know where data ends.
+  if (use_direct_io()) {
+    {
+#ifndef ROCKSDB_LITE
+      FileOperationInfo::StartTimePoint start_ts;
+      if (ShouldNotifyListeners()) {
+        start_ts = FileOperationInfo::StartNow();
+      }
+#endif
+      uint64_t filesz = filesize_.load(std::memory_order_acquire);
+      interim = writable_file_->Truncate(filesz, io_options, nullptr);
+#ifndef ROCKSDB_LITE
+      if (ShouldNotifyListeners()) {
+        auto finish_ts = FileOperationInfo::FinishNow();
+        NotifyOnFileTruncateFinish(start_ts, finish_ts, s);
+        if (!interim.ok()) {
+          NotifyOnIOError(interim, FileOperationType::kTruncate, file_name(),
+                          filesz);
+        }
+      }
+#endif
+    }
+    if (interim.ok()) {
+      {
+#ifndef ROCKSDB_LITE
+        FileOperationInfo::StartTimePoint start_ts;
+        if (ShouldNotifyListeners()) {
+          start_ts = FileOperationInfo::StartNow();
+        }
+#endif
+        interim = writable_file_->Fsync(io_options, nullptr);
+#ifndef ROCKSDB_LITE
+        if (ShouldNotifyListeners()) {
+          auto finish_ts = FileOperationInfo::FinishNow();
+          NotifyOnFileSyncFinish(start_ts, finish_ts, s,
+                                 FileOperationType::kFsync);
+          if (!interim.ok()) {
+            NotifyOnIOError(interim, FileOperationType::kFsync, file_name());
+          }
+        }
+#endif
+      }
+    }
+    if (!interim.ok() && s.ok()) {
+      s = interim;
+    }
+  }
+
+  TEST_KILL_RANDOM("WritableFileWriter::Close:0");
+  {
+#ifndef ROCKSDB_LITE
+    FileOperationInfo::StartTimePoint start_ts;
+    if (ShouldNotifyListeners()) {
+      start_ts = FileOperationInfo::StartNow();
+    }
+#endif
+    interim = writable_file_->AClose(io_options, nullptr);
+#ifndef ROCKSDB_LITE
+    if (ShouldNotifyListeners()) {
+      auto finish_ts = FileOperationInfo::FinishNow();
+      NotifyOnFileCloseFinish(start_ts, finish_ts, s);
+      if (!interim.ok()) {
+        NotifyOnIOError(interim, FileOperationType::kClose, file_name());
+      }
+    }
+#endif
+  }
+  if (!interim.ok() && s.ok()) {
+    s = interim;
+  }
+
+  writable_file_.reset();
+  TEST_KILL_RANDOM("WritableFileWriter::Close:1");
+
+  if (s.ok()) {
+    if (checksum_generator_ != nullptr && !checksum_finalized_) {
+      checksum_generator_->Finalize();
+      checksum_finalized_ = true;
+    }
+  } else {
+    set_seen_error();
+  }
+
+  return s;
+}
+
 
 IOStatus WritableFileWriter::Close() {
   if (seen_error()) {
