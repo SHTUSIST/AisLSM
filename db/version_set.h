@@ -884,6 +884,11 @@ class Version {
   // and return true. Otherwise, return false.
   bool Unref();
 
+  bool ASync_flag=false;
+  void ASyncRef();
+  bool ASyncUnref();
+  void PartDestruct();
+
   // Add all files listed in the current version to *live_table_files and
   // *live_blob_files.
   void AddLiveFiles(std::vector<uint64_t>* live_table_files,
