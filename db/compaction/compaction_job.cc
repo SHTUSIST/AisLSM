@@ -1701,14 +1701,14 @@ Status CompactionJob::InstallCompactionResults(
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
 
-    // zl modified: compaction wait: 
-    for (size_t i = 0; i < sub_compact->compaction->num_input_levels(); i++){
-      for (size_t j = 0; j < sub_compact->compaction->num_input_files(i); j++){
-        FileMetaData* fp = sub_compact->compaction->input(i,j);
-        
+      // zl modified: compaction wait: 
+    for (size_t i = 0; i < sub_compact.compaction->num_input_levels(); i++){
+      for (size_t j = 0; j < sub_compact.compaction->num_input_files(i); j++){
+        FileMetaData* fp = sub_compact.compaction->input(i,j);
+        // printf("compaction: %ld\n", fp->fd.GetNumber());
         if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
           // waitasync: 
-          outputs.GetFileWriter()->WaitASyncSST(fp->uptr);
+          urings.wait_for_sync_sst(fp->uptr);
         }
         fp->uptr = nullptr;
       }
