@@ -92,6 +92,35 @@
 #include "utilities/merge_operators/sortlist.h"
 #include "utilities/persistent_cache/block_cache_tier.h"
 
+#include <cassert>
+#include <iostream>
+#include <string>
+#include <cstring>
+#include <sstream>
+#include <cstdlib>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+
+
+#define MAX_TRACE_OPS 100000000
+#define MAX_VALUE_SIZE (1024 * 1024)
+#define sassert(X) {if (!(X)) std::cerr << "\n\n\n\n" << status.ToString() << "\n\n\n\n"; assert(X);}
+
+//#define TIMER_LOG
+
+#ifdef TIMER_LOG
+#define micros(a) a = Env::Default()->NowMicros()
+#define print_timer_info(a, b, c)   printf("%s: %lu micros (%f ms)\n", a, abs(b - c), abs(b - c)/1000.0);
+#else
+#define micros(a)
+#define print_timer_info(a, b, c)
+#endif
+
+typedef struct timespec instrumentation_type;
+
+
 #ifdef MEMKIND
 #include "memory/memkind_kmem_allocator.h"
 #endif
@@ -3332,6 +3361,266 @@ class Benchmark {
     exit(1);
   }
 
+    struct trace_operation_t {
+	  char cmd;
+	  unsigned long long key;
+	  unsigned long param;
+  };
+  struct trace_operation_t *trace_ops[16]; // Assuming maximum of 16 concurrent threads
+	
+	struct result_t {
+		unsigned long long ycsbdata;
+		unsigned long long ycsb_r;
+		unsigned long long ycsb_d;
+		unsigned long long ycsb_i;
+		unsigned long long ycsb_u;
+		unsigned long long ycsb_s;
+		unsigned long long kv_p;
+		unsigned long long kv_g;
+		unsigned long long kv_d;
+		unsigned long long kv_itseek;
+		unsigned long long kv_itnext;
+	};
+	
+  struct result_t results[10];
+	
+  unsigned long long print_splitup(int tid) {
+	  struct result_t& result = results[tid];
+	  fprintf(stderr, "YCSB splitup: R = %llu, D = %llu, I = %llu, U = %llu, S = %llu\n",
+		 result.ycsb_r,
+		 result.ycsb_d,
+		 result.ycsb_i,
+		 result.ycsb_u,
+		 result.ycsb_s);
+	  fprintf(stderr, "Database splitup: P = %llu, G = %llu, D = %llu, ItSeek = %llu, ItNext = %llu\n",
+		 result.kv_p,
+		 result.kv_g,
+		 result.kv_d,
+		 result.kv_itseek,
+		 result.kv_itnext);
+	  return result.ycsb_r + result.ycsb_d + result.ycsb_i + result.ycsb_u + result.ycsb_s;
+  }
+	
+  int split_file_names(const char *file, char file_names[20][100]) {
+	  char delimiter = ',';
+	  int index  = 0;
+	  int cur = 0;
+	  for (size_t i = 0; i < strlen(file); i++) {
+		  if (file[i] == ',') {
+			  if (cur > 0) {
+				  file_names[index][cur] = '\0';
+				  index++;
+				  cur = 0;
+			  }
+			  continue;
+		  }
+		  if (file[i] == ' ') {
+			  continue;
+		  }
+		  file_names[index][cur] = file[i];
+		  cur++;
+	  }
+	  if (cur > 0) {
+		  file_names[index][cur] = '\0';
+		  cur = 0;
+		  index++;
+	  }
+	  return index;
+  }
+	
+  void parse_trace(const char *file, int tid) {
+	  int ret;
+	  char *buf;
+	  FILE *fp;
+	  size_t bufsize = 1000;
+	  struct trace_operation_t *curop = NULL;
+	  unsigned long long total_ops = 0;
+		
+	  char file_names[20][100];
+	  int num_trace_files = split_file_names(file, file_names);
+		
+	  const char* corresponding_file;
+	  if (tid >= num_trace_files) {
+		  corresponding_file = file_names[num_trace_files-1]; // Take the last file if number of files is lesser
+	  } else {
+		  corresponding_file = file_names[tid];
+	  }
+		
+	  fprintf(stderr, "Thread %d: Parsing trace ...\n", tid);
+	  trace_ops[tid] = (struct trace_operation_t *) mmap(NULL, MAX_TRACE_OPS * sizeof(struct trace_operation_t), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	  if (trace_ops[tid] == MAP_FAILED)
+		  perror(NULL);
+	  assert(trace_ops[tid] != MAP_FAILED);
+		
+	  buf = (char *) malloc(bufsize);
+	  assert (buf != NULL);
+		
+	  fp = fopen(corresponding_file, "r");
+	  assert(fp != NULL);
+	  curop = trace_ops[tid];
+	  while((ret = getline(&buf, &bufsize, fp)) > 0) {
+		  char tmp[1000];
+		  ret = sscanf(buf, "%c %llu %lu\n", &curop->cmd, &curop->key, &curop->param);
+		  assert(ret == 2 || ret == 3);
+		  if (curop->cmd == 'r' || curop->cmd == 'd') {
+			  assert(ret == 2);
+			  sprintf(tmp, "%c %llu\n", curop->cmd, curop->key);
+			  assert(strcmp(tmp, buf) == 0);
+		  } else if (curop->cmd == 's' || curop->cmd == 'u' || curop->cmd == 'i') {
+			  assert(ret == 3);
+			  sprintf(tmp, "%c %llu %lu\n", curop->cmd, curop->key, curop->param);
+			  assert(strcmp(tmp, buf) == 0);
+		  } else {
+			  assert(false);
+		  }
+		  curop++;
+		  total_ops++;
+	  }
+	  fprintf(stderr, "Thread %d: Done parsing, %llu operations.\n", tid, total_ops);
+  }
+	
+  char valuebuf[MAX_VALUE_SIZE];
+	
+  void perform_op(DB *db, struct trace_operation_t *op, int tid) {
+	  char keybuf[100];
+	  int keylen;
+	  Status status;
+	  instrumentation_type db_read_time;
+	  static struct ReadOptions roptions;
+	  static struct WriteOptions woptions;
+		
+	  keylen = sprintf(keybuf, "user%llu", op->key);
+	  Slice key(keybuf, keylen);
+		
+	  struct result_t& result = results[tid];
+	  if (op->cmd == 'r') {
+		  std::string value;
+		  //START_TIMING(db_read_t, db_read_time);
+		  status = db->Get(roptions, key, &value);
+		  //END_TIMING(db_read_t, db_read_time);		  
+		  sassert(status.ok());
+		  result.ycsbdata += keylen + value.length();
+		  //assert(value.length() == 1080);
+		  result.ycsb_r++;
+		  result.kv_g++;
+	  } else if (op->cmd == 'd') {
+		  status = db->Delete(woptions, key);
+		  sassert(status.ok());
+		  result.ycsbdata += keylen;
+		  result.ycsb_d++;
+		  result.kv_d++;
+	  } else if (op->cmd == 'i') {
+		  // op->param refers to the size of the value.
+		  status = db->Put(woptions, key, Slice(valuebuf, op->param));
+		  sassert(status.ok());
+		  result.ycsbdata += keylen + op->param;
+		  result.ycsb_i++;
+		  result.kv_p++;
+	  } else if (op->cmd == 'u') {
+		  int update_value_size = 1024;
+		  status = db->Put(woptions, key, Slice(valuebuf, update_value_size));
+		  sassert(status.ok());
+		  result.ycsbdata += keylen + op->param;
+		  result.ycsb_u++;
+		  result.kv_g++;
+		  result.kv_p++;
+	  } else if (op->cmd == 's') {
+		  // op->param refers to the number of records to scan.
+		  int retrieved = 0;
+		  result.kv_itseek++;
+		  Iterator *it;
+		  it = db->NewIterator(ReadOptions());
+		  int required = op->param;
+		  //  required = 1;
+		  for (it->Seek(key); it->Valid() && retrieved < required; it->Next()) {
+			  if (!it->status().ok())
+				  std::cerr << "\n\n" << it->status().ToString() << "\n\n";
+			  assert(it->status().ok());
+				
+			  // Actually retrieving the key and the value, since
+			  // that might incur disk reads.
+			  unsigned long retvlen = it->value().ToString().length();
+			  unsigned long retklen = it->key().ToString().length();
+			  result.ycsbdata += retklen + retvlen;
+				
+			  result.kv_itnext++;
+			  retrieved ++;
+		  }
+		  delete it;
+		  result.ycsb_s++;
+	  } else {
+		  assert(false);
+	  }
+  }
+	
+  #define envinput(var, type) {assert(getenv(#var)); int ret = sscanf(getenv(#var), type, &var); assert(ret == 1);}
+	#define envstrinput(var) strcpy(var, getenv(#var))
+	
+  void YCSB(ThreadState* thread) {
+	  int tid = thread->tid;
+	  char trace_file[1000];
+		
+	  envstrinput(trace_file);
+
+		
+	  parse_trace(trace_file, tid);
+		
+	  struct rlimit rlim = {1000000,1000000};
+	  rlim.rlim_cur = 1000000;
+	  rlim.rlim_max = 1000000;
+	  int ret = setrlimit(RLIMIT_NOFILE, &rlim);
+	  //assert(ret == 0);
+			
+	  struct trace_operation_t *curop = trace_ops[tid];
+	  unsigned long long total_ops = 0;
+	  struct timeval start, end;
+		
+	  fprintf(stderr, "Thread %d: Replaying trace ...\n", tid);
+		
+	  gettimeofday(&start, NULL);
+	  fprintf(stderr, "\nCompleted 0 ops");
+	  fflush(stderr);
+	  while(curop->cmd) {
+		  perform_op(db_.db, curop, tid);
+		  thread->stats.FinishedOps(nullptr,nullptr,1,kOthers);
+		  curop++;
+		  total_ops++;
+		  //if (total_ops % 10000 == 0) {
+		  //fprintf(stderr, "\rCompleted %llu ops", total_ops);
+		  //}
+	  }
+	  fprintf(stderr, "\r");
+	  int ret2 = gettimeofday(&end, NULL);
+	  double secs = (end.tv_sec - start.tv_sec) + double(end.tv_usec - start.tv_usec) / 1000000;
+		
+	  struct result_t& result = results[tid];
+	  fprintf(stderr, "\n\nThread %d: Done replaying %llu operations.\n", tid, total_ops);
+	  unsigned long long splitup_ops = print_splitup(tid);
+	  assert(splitup_ops == total_ops);
+	  fprintf(stderr, "Thread %d: Time taken = %0.3lf seconds\n", tid, secs);
+	  fprintf(stderr, "Thread %d: Total data: YCSB = %0.6lf GB\n", tid,
+		 double(result.ycsbdata) / 1024.0 / 1024.0 / 1024.0);
+	  fprintf(stderr, "Thread %d: Ops/s = %0.3lf Kops/s\n", tid, double(total_ops) / 1024.0 / secs);
+		
+	  double throughput = double(result.ycsbdata) / secs;
+	  fprintf(stderr, "Thread %d: Throughput = %0.6lf MB/s\n", tid, throughput / 1024.0 / 1024.0);
+  }
+	
+  void print_current_db_contents() {
+	  std::string current_db_state;
+	  fprintf(stderr, "----------------------Current DB state-----------------------\n");
+	  if (db_.db == NULL) {
+		  fprintf(stderr, "db_ is NULL !!\n");
+		  return;
+	  }
+	  // db_->GetCurrentVersionState(&current_db_state);
+	  fprintf(stderr, "%s\n", current_db_state.c_str());
+	  fprintf(stderr, "-------------------------------------------------------------\n");
+  }
+
+
+
+
   void Run() {
     if (!SanityCheck()) {
       ErrorExit();
@@ -3432,7 +3721,11 @@ class Benchmark {
         } else {
           method = &Benchmark::WriteUniqueRandomDeterministic;
         }
-      } else if (name == "fillseq") {
+      } 
+      else if (name == "ycsb") {
+	      method = &Benchmark::YCSB;
+      }
+      else if (name == "fillseq") {
         fresh_db = true;
         method = &Benchmark::WriteSeq;
       } else if (name == "fillbatch") {
