@@ -80,7 +80,6 @@ class Urings{
     }
    ~Urings(){
     init = false;
-    printf("clear!\n");
   }
     struct uring_queue* wait_for_write_sst(struct uring_queue* uptr);
     struct uring_queue* submit_write_sst(struct uring_queue* uptr);

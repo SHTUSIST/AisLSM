@@ -172,6 +172,7 @@ void Urings::clear_all(uring_type queue_type)
       break;
   }
   this->init = false;
+  printf("clear!\n");
 }
 struct uring_queue* Urings::submit_write_sst(struct uring_queue* uptr)
 {
@@ -183,6 +184,7 @@ struct uring_queue* Urings::submit_write_sst(struct uring_queue* uptr)
   return uptr;
 }
 
+// submit fsync sst
 struct uring_queue* Urings::submit_fsync_sst(struct uring_queue* uptr)
 {
   struct io_uring *uq = &uptr->uring;
@@ -204,7 +206,11 @@ struct uring_queue* Urings::submit_fsync_sst(struct uring_queue* uptr)
     }
     uptr->sync_count += 1;
   }
-
+  while (!uptr->fds.empty()) {
+    int fd_ = uptr->fds.back();
+    close(fd_);
+    uptr->fds.pop_back();           
+  }
   return uptr;
 }
 
@@ -254,11 +260,7 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
       }
       io_uring_cqe_seen(&uptr->uring, cqe);
     }
-    while (!uptr->fds.empty()) {
-      int fd_ = uptr->fds.back(); 
-      close(fd_);
-      uptr->fds.pop_back();               
-    }
+    
     uptr->sync_count = 0;
     uptr->prep_write_count = 0;
     uptr->write_count = 0;
