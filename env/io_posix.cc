@@ -124,7 +124,7 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   struct uring_queue* uptr = this->compaction_urings[index];
   while(uptr->running)
   {
-    if (counter_for_while > 64)
+    if (counter_for_while > 8)
     {
       printf("so sad!\n");
       this->wait_for_sync_sst(uptr);

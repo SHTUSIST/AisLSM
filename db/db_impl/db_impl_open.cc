@@ -1697,7 +1697,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
 
     /* Init all queues */
-    urings.init_queues(512,2,16384,2,flag_nvme_iopll);
+    urings.init_queues(256,2,16384,2,flag_nvme_iopll);
 
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
