@@ -585,9 +585,16 @@ IOStatus WritableFileWriter::WriteBuffered(
         if (perform_data_verification_) {
           Crc32cHandoffChecksumCalculation(src, allowed, checksum_buf);
           v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+          if(this->is_compaction)
+            s = writable_file_->Append2(Slice(src, allowed), io_options, v_info,
+                                     nullptr);
+          else
           s = writable_file_->Append(Slice(src, allowed), io_options, v_info,
                                      nullptr);
         } else {
+          if(this->is_compaction)
+          s = writable_file_->Append2(Slice(src, allowed), io_options, nullptr);
+          else
           s = writable_file_->Append(Slice(src, allowed), io_options, nullptr);
         }
         if (!s.ok()) {
@@ -685,7 +692,11 @@ IOStatus WritableFileWriter::WriteBufferedWithChecksum(
 
       EncodeFixed32(checksum_buf, buffered_data_crc32c_checksum_);
       v_info.checksum = Slice(checksum_buf, sizeof(uint32_t));
+      if(this->is_compaction)
+      s = writable_file_->Append2(Slice(src, left), io_options, v_info, nullptr);
+      else
       s = writable_file_->Append(Slice(src, left), io_options, v_info, nullptr);
+
       SetPerfLevel(prev_perf_level);
     }
     if (ShouldNotifyListeners()) {

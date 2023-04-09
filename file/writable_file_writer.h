@@ -176,7 +176,8 @@ class WritableFileWriter {
       const std::vector<std::shared_ptr<EventListener>>& listeners = {},
       FileChecksumGenFactory* file_checksum_gen_factory = nullptr,
       bool perform_data_verification = false,
-      bool buffered_data_with_checksum = false)
+      bool buffered_data_with_checksum = false,
+      bool compaction = false)
       : file_name_(_file_name),
         writable_file_(std::move(file), io_tracer, _file_name),
         clock_(clock),
@@ -196,7 +197,8 @@ class WritableFileWriter {
         checksum_finalized_(false),
         perform_data_verification_(perform_data_verification),
         buffered_data_crc32c_checksum_(0),
-        buffered_data_with_checksum_(buffered_data_with_checksum) {
+        buffered_data_with_checksum_(buffered_data_with_checksum), 
+        is_compaction(compaction){
     temperature_ = options.temperature;
     assert(!use_direct_io() || max_buffer_size_ > 0);
     TEST_SYNC_POINT_CALLBACK("WritableFileWriter::WritableFileWriter:0",
@@ -230,7 +232,7 @@ class WritableFileWriter {
     auto s = Close();
     s.PermitUncheckedError();
   }
-
+  bool is_compaction;
   std::string file_name() const { return file_name_; }
 
   // When this Append API is called, if the crc32c_checksum is not provided, we

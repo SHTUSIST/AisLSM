@@ -355,10 +355,17 @@ class PosixWritableFile : public FSWritableFile {
   virtual IOStatus Close(const IOOptions& opts, IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
                           IODebugContext* dbg) override;
+  virtual IOStatus Append2(const Slice& data, const IOOptions& opts,
+                          IODebugContext* dbg) override;
   virtual IOStatus Append(const Slice& data, const IOOptions& opts,
                           const DataVerificationInfo& /* verification_info */,
                           IODebugContext* dbg) override {
     return Append(data, opts, dbg);
+  }
+  virtual IOStatus Append2(const Slice& data, const IOOptions& opts,
+                          const DataVerificationInfo& /* verification_info */,
+                          IODebugContext* dbg) override {
+    return Append2(data, opts, dbg);
   }
   virtual IOStatus PositionedAppend(const Slice& data, uint64_t offset,
                                     const IOOptions& opts,

@@ -56,8 +56,18 @@
 #include "table/unique_id_impl.h"
 #include "test_util/sync_point.h"
 #include "util/stop_watch.h"
+#include <chrono>
 
 namespace ROCKSDB_NAMESPACE {
+
+double compaction_job_time = 0;
+double compaction_merge_sort_time = 0;
+double compaction_internal_construction_time = 0;
+double compaction_next_time = 0;
+double compaction_write_time = 0; 
+double compaction_append_time = 0;
+double compaction_sync_time = 0;
+
 
 const char* GetCompactionReasonString(CompactionReason compaction_reason) {
   switch (compaction_reason) {
@@ -614,6 +624,8 @@ void CompactionJob::GenSubcompactionBoundaries() {
 }
 
 Status CompactionJob::Run() {
+  //
+  auto begin = std::chrono::steady_clock::now();
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_RUN);
   TEST_SYNC_POINT("CompactionJob::Run():Start");
@@ -807,6 +819,22 @@ Status CompactionJob::Run() {
   TEST_SYNC_POINT("CompactionJob::Run():End");
 
   compact_->status = status;
+  auto end = std::chrono::steady_clock::now();
+  compaction_job_time += std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+  printf("Compaction level %d: compaction job time: %f, internal iterator construction time: %f,\
+  merge sort time: %f, next time: %f, write time: %f,\
+  append time %f, sync time %f \n", \
+          compact_->compaction->output_level(), compaction_job_time, compaction_internal_construction_time, compaction_merge_sort_time, 
+          compaction_next_time, compaction_write_time, compaction_append_time, compaction_sync_time); 
+  
+  compaction_job_time = 0; //
+  compaction_internal_construction_time = 0; //
+  compaction_merge_sort_time = 0; //
+  compaction_next_time = 0;
+  compaction_write_time = 0; //
+  compaction_append_time = 0; //
+  compaction_sync_time = 0; //
+
   return status;
 }
 
@@ -1106,6 +1134,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       read_options.iterate_upper_bound = &end_without_ts.value();
     }
   }
+  auto internal_begin = std::chrono::steady_clock::now();
 
   // Although the v2 aggregator is what the level iterator(s) know about,
   // the AddTombstones calls will be propagated down to the v1 aggregator.
@@ -1178,6 +1207,8 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   }
 
   input->SeekToFirst();
+  auto internal_end = std::chrono::steady_clock::now();
+  compaction_internal_construction_time += std::chrono::duration_cast<std::chrono::microseconds>(internal_end - internal_begin).count();
 
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_PROCESS_KV);
@@ -1201,6 +1232,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     prev_cpu_write_nanos = IOSTATS(cpu_write_nanos);
     prev_cpu_read_nanos = IOSTATS(cpu_read_nanos);
   }
+  auto merge_begin = std::chrono::steady_clock::now();
 
   MergeHelper merge(
       env_, cfd->user_comparator(), cfd->ioptions()->merge_operator.get(),
@@ -1263,6 +1295,9 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
   // define the open and close functions for the compaction files, which will be
   // used open/close output files when needed.
+  auto merge_end = std::chrono::steady_clock::now();
+  compaction_merge_sort_time += std::chrono::duration_cast<std::chrono::microseconds>(merge_end - merge_begin).count();
+
   const CompactionFileOpenFunc open_file_func =
       [this, sub_compact](CompactionOutputs& outputs) {
         return this->OpenCompactionOutputFile(sub_compact, outputs);
@@ -1310,7 +1345,10 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
         "CompactionJob::Run():PausingManualCompaction:2",
         reinterpret_cast<void*>(
             const_cast<std::atomic<bool>*>(&manual_compaction_canceled_)));
+    auto next_begin = std::chrono::steady_clock::now();
     c_iter->Next();
+    auto next_end = std::chrono::steady_clock::now();
+    compaction_next_time += std::chrono::duration_cast<std::chrono::microseconds>(next_end - next_begin).count();
     if (c_iter->status().IsManualCompactionPaused()) {
       break;
     }
@@ -1866,7 +1904,7 @@ Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
   outputs.AssignFileWriter(new WritableFileWriter(
       std::move(writable_file), fname, fo_copy, db_options_.clock, io_tracer_,
       db_options_.stats, listeners, db_options_.file_checksum_gen_factory.get(),
-      tmp_set.Contains(FileType::kTableFile), false));
+      tmp_set.Contains(FileType::kTableFile), false, true));
 
   TableBuilderOptions tboptions(
       *cfd->ioptions(), *(sub_compact->compaction->mutable_cf_options()),

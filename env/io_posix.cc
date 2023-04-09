@@ -39,6 +39,7 @@
 #include "util/autovector.h"
 #include "util/coding.h"
 #include "util/string_util.h"
+#include <chrono>
 
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
@@ -47,6 +48,7 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern double compaction_append_time;
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name) {
   if (file_name.empty()) {
@@ -1310,7 +1312,25 @@ IOStatus PosixWritableFile::Append(const Slice& data, const IOOptions& /*opts*/,
   filesize_ += nbytes;
   return IOStatus::OK();
 }
+IOStatus PosixWritableFile::Append2(const Slice& data, const IOOptions& /*opts*/,
+                                   IODebugContext* /*dbg*/) {
+  auto begin = std::chrono::steady_clock::now();
+  if (use_direct_io()) {
+    assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
+    assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
+  }
+  const char* src = data.data();
+  size_t nbytes = data.size();
 
+  if (!PosixWrite(fd_, src, nbytes)) {
+    return IOError("While appending to file", filename_, errno);
+  }
+  filesize_ += nbytes;
+  auto end = std::chrono::steady_clock::now();
+  double duration = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+  compaction_append_time += duration;
+  return IOStatus::OK();
+}
 IOStatus PosixWritableFile::PositionedAppend(const Slice& data, uint64_t offset,
                                              const IOOptions& /*opts*/,
                                              IODebugContext* /*dbg*/) {

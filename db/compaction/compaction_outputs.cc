@@ -14,6 +14,9 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern double compaction_sync_time;
+extern double compaction_write_time;
+
 void CompactionOutputs::NewBuilder(const TableBuilderOptions& tboptions) {
   builder_.reset(NewTableBuilder(tboptions, file_writer_.get()));
 }
@@ -59,7 +62,11 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
   IOStatus io_s;
   if (input_status.ok()) {
     StopWatch sw(clock, statistics, COMPACTION_OUTFILE_SYNC_MICROS);
+    auto begin = std::chrono::steady_clock::now();
     io_s = file_writer_->Sync(use_fsync);
+    auto end = std::chrono::steady_clock::now();
+    double duration = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+    compaction_sync_time += duration;
   }
   if (input_status.ok() && io_s.ok()) {
     io_s = file_writer_->Close();
@@ -407,7 +414,11 @@ Status CompactionOutputs::AddToOutput(
   if (!s.ok()) {
     return s;
   }
+  auto write_begin = std::chrono::steady_clock::now();
   builder_->Add(key, value);
+  auto write_end = std::chrono::steady_clock::now();
+  double duration = std::chrono::duration_cast<std::chrono::microseconds>(write_end - write_begin).count();
+  compaction_write_time += duration;
 
   stats_.num_output_records++;
   current_output_file_size_ = builder_->EstimatedFileSize();

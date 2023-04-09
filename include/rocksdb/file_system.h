@@ -960,7 +960,10 @@ class FSWritableFile {
   // PositionedAppend, so the users cannot mix the two.
   virtual IOStatus Append(const Slice& data, const IOOptions& options,
                           IODebugContext* dbg) = 0;
-
+  virtual IOStatus Append2(const Slice& data, const IOOptions& options,
+                          IODebugContext* dbg){
+                            return IOStatus::OK();
+                          };
   // Append data with verification information.
   // Note that this API change is experimental and it might be changed in
   // the future. Currently, RocksDB only generates crc32c based checksum for
@@ -974,7 +977,11 @@ class FSWritableFile {
                           IODebugContext* dbg) {
     return Append(data, options, dbg);
   }
-
+  virtual IOStatus Append2(const Slice& data, const IOOptions& options,
+                          const DataVerificationInfo& /* verification_info */,
+                          IODebugContext* dbg) {
+    return Append2(data, options, dbg);
+  }
   // PositionedAppend data to the specified offset. The new EOF after append
   // must be larger than the previous EOF. This is to be used when writes are
   // not backed by OS buffers and hence has to always start from the start of
