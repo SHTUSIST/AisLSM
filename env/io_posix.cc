@@ -67,7 +67,6 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     {
       struct uring_queue* qptr;
       qptr = new struct uring_queue();
-      qptr->data = nullptr;
       qptr->running = false;
       qptr->id = i;
       qptr->sync_count = 0;
@@ -89,7 +88,6 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
     {
       struct uring_queue* qptr;
       qptr = new struct uring_queue();
-      qptr->data = nullptr;
       qptr->running = false;
       qptr->sync_count = 0;
       qptr->id = i;
@@ -134,18 +132,20 @@ void Urings::clear_all(uring_type queue_type)
   switch(queue_type)
   {
     case uring_type::uring_compaction_type:
-      for(int i = 0; i < this->compaction_queue_size; ++i)
+      if(this->compaction_urings)
       {
-        /*while(this->compaction_urings[i]->running)
+        for(int i = 0; i < this->compaction_queue_size; ++i)
         {
-
-        }*/
-        io_uring_queue_exit(&(this->compaction_urings[i]->uring));
+          this->compaction_urings[i]->store_filenumber.clear();
+          io_uring_queue_exit(&(this->compaction_urings[i]->uring));
+        }
+        delete this->compaction_urings;
+        this->compaction_urings = nullptr;
+        this->compaction_queue_size = 0;
+        this->compaction_queue_depth = 0;
+        this->init = false;
+        this->reserve_input.clear();
       }
-      delete this->compaction_urings;
-      this->compaction_urings = nullptr;
-      this->compaction_queue_size = 0;
-      this->compaction_queue_depth = 0;
       break;
     case uring_type::uring_log_type:
       for(int i = 0; i < this->log_queue_size; ++i)
@@ -161,7 +161,6 @@ void Urings::clear_all(uring_type queue_type)
       break;
   }
 }
-
 
 
 /* Wait for count times, data will reset to nullptr, need to store it before. */
@@ -193,8 +192,6 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
   }
   if(uptr->fds.empty())
   {
-    static_cast<Version*>(uptr->data)->ASyncUnref();
-    uptr->data = nullptr;
     uptr->running.store(false);
 
 
@@ -1400,10 +1397,7 @@ IOStatus PosixMmapFile::ASync(const IOOptions& opts, IODebugContext* dbg, struct
 IOStatus PosixMmapFile::AFsync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr){
   return Fsync(opts, dbg);
 }
-IOStatus PosixMmapFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
-{
-  return IOStatus::OK();
-}
+
 
 /**
  * Get the size of valid data in the file. This will not match the
@@ -1731,12 +1725,7 @@ IOStatus PosixWritableFile::AFsync(const IOOptions& /*opts*/,
   return IOStatus::OK();
 }
 
-IOStatus PosixWritableFile::WaitASync(const IOOptions& opts, IODebugContext* dbg, struct uring_queue* uptr)
-{
-  urings.wait_for_queue(uptr);
-  // printf("WaitASync: uq: %p\n", uq_t);
-  return IOStatus::OK();
-}
+
 bool PosixWritableFile::IsSyncThreadSafe() const { return true; }
 
 uint64_t PosixWritableFile::GetFileSize(const IOOptions& /*opts*/,

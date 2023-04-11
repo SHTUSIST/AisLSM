@@ -682,13 +682,7 @@ IOStatus WritableFileWriter::SyncInternal(bool use_fsync) {
   // The caller will be responsible to call set_seen_error() if s is not OK.
   return s;
 }
-IOStatus WritableFileWriter::WaitASync(struct uring_queue* uptr)
-{
-  IOOptions io_options;
-  //io_options.rate_limiter_priority = writable_file_->GetIOPriority();
-  IOStatus s = writable_file_->WaitASync(io_options, nullptr, uptr);
-  return s;
-}
+
 // Lei modified: ASyncInternal in WritableFileWriter
 IOStatus WritableFileWriter::ASyncInternal(bool use_fsync, struct uring_queue* uptr) {
   // Caller is supposed to check seen_error_

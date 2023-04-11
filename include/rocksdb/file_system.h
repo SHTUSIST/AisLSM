@@ -1049,9 +1049,7 @@ class FSWritableFile {
                         IODebugContext* dbg, struct uring_queue* uptr) {
                           return Sync(options, dbg);
                         }
-  virtual IOStatus WaitASync(const IOOptions& options, IODebugContext* dbg, struct uring_queue* uptr){
-    return IOStatus::OK();
-  }
+
   /*
    * Sync data and/or metadata as well.
    * By default, sync only data.

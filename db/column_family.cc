@@ -43,6 +43,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern Urings urings;
+
 ColumnFamilyHandleImpl::ColumnFamilyHandleImpl(
     ColumnFamilyData* column_family_data, DBImpl* db, InstrumentedMutex* mutex)
     : cfd_(column_family_data), db_(db), mutex_(mutex) {
@@ -661,6 +663,14 @@ ColumnFamilyData::ColumnFamilyData(
 
 // DB mutex held
 ColumnFamilyData::~ColumnFamilyData() {
+  urings.clear_all(uring_type::uring_compaction_type);
+
+  // remove all the ref file because they already have been synced from the above step
+  for (auto& kv : urings.no_ref) {
+    urings.ToBeDeteleted.insert(std::make_pair(kv.first, std::move(kv.second)));
+  }
+  urings.no_ref.clear();
+
   assert(refs_.load(std::memory_order_relaxed) == 0);
   // remove from linked list
   auto prev = prev_;

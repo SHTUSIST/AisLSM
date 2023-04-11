@@ -23,6 +23,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+extern Urings urings;
+
 uint64_t DBImpl::MinLogNumberToKeep() {
   return versions_->min_log_number_to_keep();
 }
@@ -421,14 +423,30 @@ void DBImpl::PurgeObsoleteFiles(JobContext& state, bool schedule_only) {
   // We may ignore the dbname when generating the file names.
   for (auto& file : state.sst_delete_files) {
     if (!file.only_delete_metadata) {
+
+      //this file says need to be reserved because it is in the urings reserve input
+      // put it in the urings no ref 
+      if (urings.reserve_input.count(file.metadata->fd.GetNumber()) == 1) {
+        // make pair to store fd number and path. So that we could find the location after we have deleted filemetadata
+        urings.no_ref.insert( std::make_pair(file.metadata->fd.GetNumber(),file.path) );
+      }
+      else{
       candidate_files.emplace_back(
           MakeTableFileName(file.metadata->fd.GetNumber()), file.path);
+      }
     }
     if (file.metadata->table_reader_handle) {
       table_cache_->Release(file.metadata->table_reader_handle);
     }
     file.DeleteMetadata();
   }
+
+  // re deletiong from to_be_deleted uring file
+  for (const auto& kv : urings.ToBeDeteleted) {
+    candidate_files.emplace_back(
+        MakeTableFileName(kv.first), kv.second);
+  }
+  
 
   for (const auto& blob_file : state.blob_delete_files) {
     candidate_files.emplace_back(BlobFileName(blob_file.GetBlobFileNumber()),
