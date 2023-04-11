@@ -16,8 +16,15 @@
 #include "options/options_helper.h"
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
+#include <chrono>
+#include <cstring>
 
 namespace ROCKSDB_NAMESPACE {
+std::chrono::steady_clock::time_point last_memtable = std::chrono::steady_clock::now();
+double memtable_insert = 0;
+extern int stall_type;
+double delay_time[7];
+double delay_duration = 0;
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, ColumnFamilyHandle* column_family,
                    const Slice& key, const Slice& val) {
@@ -777,6 +784,8 @@ Status DBImpl::PipelinedWriteImpl(const WriteOptions& write_options,
   // that the inner context  of the `if` as a reference to it
   // may be used further below within the outer _write_thread
   WriteThread::WriteGroup memtable_write_group;
+// mem begin
+  auto mem_begin = std::chrono::steady_clock::now();
 
   if (w.state == WriteThread::STATE_MEMTABLE_WRITER_LEADER) {
     PERF_TIMER_GUARD(write_memtable_time);
@@ -819,6 +828,9 @@ Status DBImpl::PipelinedWriteImpl(const WriteOptions& write_options,
   if (seq_used != nullptr) {
     *seq_used = w.sequence;
   }
+  auto mem_end = std::chrono::steady_clock::now();
+  double duration = std::chrono::duration_cast<std::chrono::microseconds>(mem_end - mem_begin).count();
+  memtable_insert += duration;
 
   assert(w.state == WriteThread::STATE_COMPLETED);
   return w.FinalStatus();
@@ -1797,6 +1809,7 @@ uint64_t DBImpl::GetMaxTotalWalSize() const {
 // REQUIRES: this thread is currently at the leader for write_thread
 Status DBImpl::DelayWrite(uint64_t num_bytes, WriteThread& write_thread,
                           const WriteOptions& write_options) {
+  auto delay_begin = std::chrono::steady_clock::now();
   mutex_.AssertHeld();
   uint64_t time_delayed = 0;
   bool delayed = false;
@@ -1849,6 +1862,7 @@ Status DBImpl::DelayWrite(uint64_t num_bytes, WriteThread& write_thread,
     // might wait here indefinitely as the background compaction may never
     // finish successfully, resulting in the stall condition lasting
     // indefinitely
+    //
     while (error_handler_.GetBGError().ok() && write_controller_.IsStopped() &&
            !shutting_down_.load(std::memory_order_relaxed)) {
       if (write_options.no_slowdown) {
@@ -1892,6 +1906,8 @@ Status DBImpl::DelayWrite(uint64_t num_bytes, WriteThread& write_thread,
   if (error_handler_.IsDBStopped()) {
     s = error_handler_.GetBGError();
   }
+  auto delay_end = std::chrono::steady_clock::now();
+  delay_duration = std::chrono::duration_cast<std::chrono::microseconds>(delay_end - delay_begin).count();
   return s;
 }
 
@@ -2272,6 +2288,17 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
 
   cfd->mem()->SetNextLogNumber(logfile_number_);
   assert(new_mem != nullptr);
+  auto time = last_memtable;
+  last_memtable = std::chrono::steady_clock::now();
+  double duration = std::chrono::duration_cast<std::chrono::microseconds>(last_memtable - time).count();
+  printf("shift memtable: %f, insert memtable: %f, num entries: %ld, delay time: %f %f %f %f %f %f %f\n", duration, memtable_insert,
+  cfd->mem()->num_entries(), delay_time[0], delay_time[1], delay_time[2], delay_time[3], delay_time[4], delay_time[5], delay_time[6]);
+  stall_type = 0;
+  for(int i = 0; i < 7; ++i)
+    delay_time[i] = 0;
+    // memset(delay_time, 0, sizeof(delay_time));
+  memtable_insert = 0;
+  
   cfd->imm()->Add(cfd->mem(), &context->memtables_to_free_);
   new_mem->Ref();
   cfd->SetMemtable(new_mem);
