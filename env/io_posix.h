@@ -54,8 +54,8 @@ namespace ROCKSDB_NAMESPACE {
 // The struct pass to io_uring_set_data.
 struct uring_queue{
   struct io_uring uring;
-  // store the compaction pointer
-  void* version_pointer = nullptr;
+  // reserve file number of input sstable
+  std::unordered_set<uint64_t> store_filenumber;
   std::atomic<bool> running;
   // count the number of asynchronous write request anr prep_write request
   uint16_t write_count = 0;
@@ -91,6 +91,15 @@ class Urings{
     bool init = false;
     void clear_all(uring_type queue_type);
     bool nvme_iopoll = false;
+
+    // not synced. serve for input file of compaction
+    std::unordered_set<uint64_t> reserve_input;
+
+    // no ref. means no ref but not deleted because it is in reserve_input
+    std::map<uint64_t, std::string> no_ref;
+
+    // means ref=0 and synced with uring.  will be deleted in purgeobsoletefile
+    std::map<uint64_t, std::string>  ToBeDeteleted;
 
   private: 
     uint16_t get_id(uint16_t num, uint16_t mask);

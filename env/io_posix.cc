@@ -71,7 +71,6 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   {
     struct uring_queue* qptr;
     qptr = new struct uring_queue();
-    qptr->version_pointer= nullptr;
     qptr->running = false;
     qptr->id = i;
     qptr->prep_write_count = 0;
@@ -96,7 +95,6 @@ bool Urings::init_queues(uint16_t compaction_num, uint8_t log_num, uint16_t comp
   {
     struct uring_queue* qptr;
     qptr = new struct uring_queue();
-    qptr->version_pointer = nullptr;
     qptr->running = false;
     qptr->prep_write_count = 0;
     qptr->sync_count = 0;
@@ -145,18 +143,25 @@ void Urings::clear_all(uring_type queue_type)
     return;
   switch(queue_type)
   {
-    case uring_type::uring_compaction_type:
-      for(int i = 0; i < this->compaction_queue_size; ++i)
-      {
-        struct uring_queue* uptr = this->compaction_urings[i];
-        if(uptr->running)
-          this->wait_for_sync_sst(uptr);
-        io_uring_queue_exit(&(this->compaction_urings[i]->uring));
+    case uring_type::uring_compaction_type: 
+      if(this->compaction_urings){
+        for(int i = 0; i < this->compaction_queue_size; ++i)
+        {
+          struct uring_queue* uptr = this->compaction_urings[i];
+          if(uptr->running){
+            this->wait_for_sync_sst(uptr);
+          }
+          this->compaction_urings[i]->store_filenumber.clear();
+          io_uring_queue_exit(&(this->compaction_urings[i]->uring));
+        }
       }
       delete this->compaction_urings;
       this->compaction_urings = nullptr;
       this->compaction_queue_size = 0;
       this->compaction_queue_depth = 0;
+      this->init = false;
+      this->reserve_input.clear();
+
       break;
     case uring_type::uring_log_type:
       for(int i = 0; i < this->log_queue_size; ++i)
@@ -245,7 +250,6 @@ struct uring_queue* Urings::wait_for_write_sst(struct uring_queue* uptr)
 struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
 {
   if(!uptr->running) return uptr;
-  void* data;
   int ret ;
   if(LIKELY(uptr->sync_count > 0))
   {
@@ -264,8 +268,6 @@ struct uring_queue* Urings::wait_for_sync_sst(struct uring_queue* uptr)
     uptr->sync_count = 0;
     uptr->prep_write_count = 0;
     uptr->write_count = 0;
-    static_cast<Version*>(uptr->version_pointer)->ASyncUnref();
-    uptr->version_pointer = nullptr;
   }
   uptr->running.store(false);
   return uptr;

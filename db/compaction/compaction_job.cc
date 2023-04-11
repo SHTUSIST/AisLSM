@@ -626,11 +626,7 @@ Status CompactionJob::Run() {
   struct uring_queue* uptr = urings.get_empty_element(job_id_);
   Compaction* compaction = compact_->compaction;
   compaction->uptr = uptr;
-  uptr->version_pointer = static_cast<void*>(compaction->input_version());
-  // compaction->input_version()->Ref();  
-  // Lei modified: "Ref" and "Unref" used for async
-  compaction->input_version()->ASyncRef();  
-  //compact_->uptr = 
+
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();
 
@@ -711,6 +707,38 @@ Status CompactionJob::Run() {
     thread_pool.clear();
     std::vector<const CompactionOutputs::Output*> files_output;
     for (const auto& state : compact_->sub_compact_states) {
+
+      // wait and delete unref files for async
+      for (size_t i = 0; i < state.compaction->num_input_levels(); i++){
+        for (size_t j = 0; j < state.compaction->num_input_files(i); j++){
+          FileMetaData* fp = state.compaction->input(i,j);
+          if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
+            urings.wait_for_sync_sst(fp->uptr);
+
+            // handle deleted file
+            for (auto it = uptr->store_filenumber.begin(); it != uptr->store_filenumber.end();) {
+            // if it is in no_ref, move it to urings.deleted
+            auto it_in_no_ref = urings.no_ref.find(*it); 
+            if ( it_in_no_ref!=urings.no_ref.end())
+            {
+              urings.ToBeDeteleted.insert(std::make_pair(it_in_no_ref->first,std::move(it_in_no_ref->second)));
+              urings.no_ref.erase(it_in_no_ref);
+            }
+
+            // remove corresponding element from reserve_input
+            auto reverve_input_it =urings.reserve_input.find(*it);
+            urings.reserve_input.erase(reverve_input_it);
+
+            // remove every element form uring::store_filenumber
+            it = uptr->store_filenumber.erase(it);
+            }  
+
+          }
+          fp->uptr = nullptr;
+        }
+      }
+
+
       for (const auto& output : state.GetOutputs()) {
         files_output.emplace_back(&output);
       }
@@ -1700,19 +1728,6 @@ Status CompactionJob::InstallCompactionResults(
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
-
-      // zl modified: compaction wait: 
-    for (size_t i = 0; i < sub_compact.compaction->num_input_levels(); i++){
-      for (size_t j = 0; j < sub_compact.compaction->num_input_files(i); j++){
-        FileMetaData* fp = sub_compact.compaction->input(i,j);
-        // printf("compaction: %ld\n", fp->fd.GetNumber());
-        if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
-          // waitasync: 
-          urings.wait_for_sync_sst(fp->uptr);
-        }
-        fp->uptr = nullptr;
-      }
-    }
 
     for (const auto& blob : sub_compact.Current().GetBlobFileAdditions()) {
       edit->AddBlobFile(blob);
