@@ -1907,7 +1907,7 @@ Status DBImpl::DelayWrite(uint64_t num_bytes, WriteThread& write_thread,
     s = error_handler_.GetBGError();
   }
   auto delay_end = std::chrono::steady_clock::now();
-  delay_duration = std::chrono::duration_cast<std::chrono::microseconds>(delay_end - delay_begin).count();
+  delay_duration += std::chrono::duration_cast<std::chrono::microseconds>(delay_end - delay_begin).count();
   return s;
 }
 
@@ -2293,7 +2293,6 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
   double duration = std::chrono::duration_cast<std::chrono::microseconds>(last_memtable - time).count();
   printf("shift memtable: %f, insert memtable: %f, num entries: %ld, delay time: %f %f %f %f %f %f %f\n", duration, memtable_insert,
   cfd->mem()->num_entries(), delay_time[0], delay_time[1], delay_time[2], delay_time[3], delay_time[4], delay_time[5], delay_time[6]);
-  stall_type = 0;
   for(int i = 0; i < 7; ++i)
     delay_time[i] = 0;
     // memset(delay_time, 0, sizeof(delay_time));
