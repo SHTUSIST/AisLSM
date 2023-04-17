@@ -727,7 +727,8 @@ Status CompactionJob::Run() {
 
               // remove corresponding element from reserve_input
               auto reverve_input_it =urings.reserve_input.find(*it);
-              urings.reserve_input.erase(reverve_input_it);
+              if(reverve_input_it != urings.reserve_input.end())
+                urings.reserve_input.erase(reverve_input_it);
 
               // remove every element form uring::store_filenumber
               it = uptr->store_filenumber.erase(it);
