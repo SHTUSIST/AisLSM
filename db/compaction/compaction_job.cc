@@ -622,10 +622,14 @@ Status CompactionJob::Run() {
   LogCompaction();
 
   const size_t num_threads = compact_->sub_compact_states.size();
-  // zl modified: uptr->data
-  struct uring_queue* uptr = urings.get_empty_element(job_id_);
-  Compaction* compaction = compact_->compaction;
-  compaction->uptr = uptr;
+  Compaction* compaction; 
+  struct uring_queue* uptr;
+  {
+    std::lock_guard<std::mutex> lock(urings.mtx);
+    uptr = urings.get_empty_element(job_id_);
+    compaction = compact_->compaction;
+    compaction->uptr = uptr;
+  } 
 
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();
@@ -712,6 +716,7 @@ Status CompactionJob::Run() {
         for (size_t j = 0; j < state.compaction->num_input_files(i); j++){
           FileMetaData* fp = state.compaction->input(i,j);
           // printf("compaction: %ld\n", fp->fd.GetNumber());
+          std::lock_guard<std::mutex> lock(urings.mtx);
           if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
             urings.wait_for_queue(fp->uptr);
             
@@ -733,9 +738,6 @@ Status CompactionJob::Run() {
               // remove every element form uring::store_filenumber
               it = uptr->store_filenumber.erase(it);
              }  
-
-
-
           }
           fp->uptr = nullptr;
         }

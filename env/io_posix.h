@@ -18,6 +18,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <mutex>
 
 #include "port/port.h"
 #include "rocksdb/env.h"
@@ -93,6 +94,8 @@ class Urings{
 
     // means ref=0 and synced with uring.  will be deleted in purgeobsoletefile
     std::map<uint64_t, std::string>  ToBeDeteleted;
+
+    std::mutex mtx;
 
   private: 
     uint16_t get_id(uint16_t num, uint16_t mask);

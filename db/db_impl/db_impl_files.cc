@@ -423,6 +423,7 @@ void DBImpl::PurgeObsoleteFiles(JobContext& state, bool schedule_only) {
   // We may ignore the dbname when generating the file names.
   for (auto& file : state.sst_delete_files) {
     if (!file.only_delete_metadata) {
+      std::lock_guard<std::mutex> lock(urings.mtx);
 
       //this file says need to be reserved because it is in the urings reserve input
       // put it in the urings no ref 
@@ -442,9 +443,12 @@ void DBImpl::PurgeObsoleteFiles(JobContext& state, bool schedule_only) {
   }
 
   // re deletiong from to_be_deleted uring file
-  for (const auto& kv : urings.ToBeDeteleted) {
-    candidate_files.emplace_back(
-        MakeTableFileName(kv.first), kv.second);
+  {
+    std::lock_guard<std::mutex> lock(urings.mtx);
+    for (const auto& kv : urings.ToBeDeteleted) {
+      candidate_files.emplace_back(
+          MakeTableFileName(kv.first), kv.second);
+    }
   }
   
 
