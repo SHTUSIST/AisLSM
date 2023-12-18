@@ -61,7 +61,8 @@
 namespace ROCKSDB_NAMESPACE {
 
 extern Urings urings;
-
+extern float wait_time;
+extern float timer; 
 const char* GetCompactionReasonString(CompactionReason compaction_reason) {
   switch (compaction_reason) {
     case CompactionReason::kUnknown:
@@ -624,12 +625,11 @@ Status CompactionJob::Run() {
   const size_t num_threads = compact_->sub_compact_states.size();
   Compaction* compaction; 
   struct uring_queue* uptr;
-  {
-    std::lock_guard<std::mutex> lock(urings.mtx);
-    uptr = urings.get_empty_element(job_id_);
-    compaction = compact_->compaction;
-    compaction->uptr = uptr;
-  } 
+  
+  uptr = urings.get_empty_element(job_id_);
+  compaction = compact_->compaction;
+  compaction->uptr = uptr;
+  
 
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();
@@ -715,29 +715,31 @@ Status CompactionJob::Run() {
       for (size_t i = 0; i < state.compaction->num_input_levels(); i++){
         for (size_t j = 0; j < state.compaction->num_input_files(i); j++){
           FileMetaData* fp = state.compaction->input(i,j);
-          // printf("compaction: %ld\n", fp->fd.GetNumber());
-          std::lock_guard<std::mutex> lock(urings.mtx);
+          // Store parents into store file number and reverse input map. 
+            std::lock_guard<std::mutex> lock(urings.mtx);
+            urings.reserve_input.insert(fp->fd.GetNumber());
+            uptr->store_filenumber.insert(fp->fd.GetNumber());
+
           if(fp->uptr != nullptr && fp->uptr->job_id == fp->job_id){
             urings.wait_for_queue(fp->uptr);
-            
-           
-             for (auto it = uptr->store_filenumber.begin(); it != uptr->store_filenumber.end();) {
+          for (auto it = fp->uptr->store_filenumber.begin(); it != fp->uptr->store_filenumber.end();) {
               // if it is in no_ref, move it to urings.deleted
               auto it_in_no_ref = urings.no_ref.find(*it); 
-              if ( it_in_no_ref!=urings.no_ref.end())
+              if (it_in_no_ref != urings.no_ref.end())
               {
                 urings.ToBeDeteleted.insert(std::make_pair(it_in_no_ref->first,std::move(it_in_no_ref->second)));
                 urings.no_ref.erase(it_in_no_ref);
               }
 
               // remove corresponding element from reserve_input
-              auto reverve_input_it =urings.reserve_input.find(*it);
+              auto reverve_input_it = urings.reserve_input.find(*it);
               if(reverve_input_it != urings.reserve_input.end())
                 urings.reserve_input.erase(reverve_input_it);
 
               // remove every element form uring::store_filenumber
-              it = uptr->store_filenumber.erase(it);
-             }  
+              it = fp->uptr->store_filenumber.erase(it);
+            } 
+              
           }
           fp->uptr = nullptr;
         }

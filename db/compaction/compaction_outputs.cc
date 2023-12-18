@@ -82,10 +82,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
     meta->file_checksum_func_name = file_writer_->GetFileChecksumFuncName();
 
     // put it in the uring, so that after wait uring we could know which file number has been completed. 
-    uptr->store_filenumber.insert(meta->fd.GetNumber());
     // could be eliminated.  help purgeobsolteffile to know whether deleted file or not
-    std::lock_guard<std::mutex> lock(urings.mtx);
-    urings.reserve_input.insert(meta->fd.GetNumber());
   }
 
   file_writer_.reset();
