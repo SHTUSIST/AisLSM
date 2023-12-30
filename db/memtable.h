@@ -534,6 +534,16 @@ class MemTable {
                                     size_t protection_bytes_per_key,
                                     bool allow_data_in_errors = false);
 
+  void SetLogWriter(void* log_w) {
+    log_writer = log_w;
+  }
+
+  // Lei modified: data structure for save io_uring
+  struct uring_queue* uq;
+  // Lei modified: data structure for log
+  void* log_writer = nullptr;
+
+
  private:
   enum FlushStateEnum { FLUSH_NOT_REQUESTED, FLUSH_REQUESTED, FLUSH_SCHEDULED };
 

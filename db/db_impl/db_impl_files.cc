@@ -449,6 +449,7 @@ void DBImpl::PurgeObsoleteFiles(JobContext& state, bool schedule_only) {
       candidate_files.emplace_back(
           MakeTableFileName(kv.first), kv.second);
     }
+    urings.ToBeDeteleted.clear();
   }
   
 

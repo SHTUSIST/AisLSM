@@ -18,6 +18,11 @@
 #include "util/cast_util.h"
 
 namespace ROCKSDB_NAMESPACE {
+
+// huyp, add for log async
+extern Urings urings;
+
+
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, ColumnFamilyHandle* column_family,
                    const Slice& key, const Slice& val) {
@@ -2123,6 +2128,13 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
         cur_log_writer->file()->reset_seen_error();
       }
       io_s = cur_log_writer->WriteBuffer();
+
+      struct uring_queue* uptr = urings.get_empty_element_for_log();
+      cur_log_writer->file()->ASync(false, uptr);
+      cfd->mem()->uq = uptr;
+      cfd->mem()->SetLogWriter(static_cast<void*>(cur_log_writer));
+
+
       if (s.ok()) {
         s = io_s;
       }

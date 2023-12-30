@@ -80,6 +80,7 @@ class Urings{
     printf("clear!\n");
   }
     struct uring_queue* get_empty_element(uint32_t id);
+    struct uring_queue* get_empty_element_for_log();
     struct uring_queue* wait_for_queue(struct uring_queue* uptr);
     bool init_queues(uint16_t compaction_num = 512, uint8_t log_num = 1, uint16_t compaction_depth = 64, uint8_t log_depth = 1);
     bool init = false;
@@ -97,10 +98,11 @@ class Urings{
 
     std::mutex mtx;
 
+    struct uring_queue** log_urings = nullptr;
+    
   private: 
     uint16_t get_id(uint16_t num, uint16_t mask);
     struct uring_queue** compaction_urings = nullptr;
-    struct uring_queue** log_urings = nullptr;
     uint16_t compaction_queue_size = 0;
     uint16_t log_queue_size = 0;
     uint16_t compaction_queue_depth = 0;

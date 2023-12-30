@@ -127,6 +127,29 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   return uptr;
 }
 
+
+struct uring_queue* Urings::get_empty_element_for_log()
+{
+  uint32_t index = 0;
+  uint32_t counter_for_while = 0;
+  struct uring_queue* uptr = this->log_urings[index];
+  while(uptr->running)
+  {
+    if (counter_for_while > 4)
+    {
+      struct io_uring_cqe* cqe;
+      io_uring_wait_cqe(&uptr->uring, &cqe);
+      io_uring_cqe_seen(&uptr->uring, cqe);
+      break;
+    }
+    counter_for_while += 1;
+    index = (counter_for_while) %(this->log_queue_size);
+    uptr = this->log_urings[index];
+  }
+  uptr->running.store(true);
+  return uptr;
+}
+
 void Urings::clear_all(uring_type queue_type)
 {
   switch(queue_type)
