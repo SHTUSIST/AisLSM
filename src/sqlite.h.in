@@ -33,7 +33,8 @@
 #ifndef SQLITE3_H
 #define SQLITE3_H
 #include <stdarg.h>     /* Needed for the definition of va_list */
-
+// zl:
+#include "liburing.h"
 /*
 ** Make sure we can call this stuff from C++.
 */
@@ -856,6 +857,9 @@ struct sqlite3_io_methods {
   int (*xUnfetch)(sqlite3_file*, sqlite3_int64 iOfst, void *p);
   /* Methods above are valid for version 3 */
   /* Additional methods may be added in future releases */
+    /* zl: Add async and wait async unix calls */
+  int (*xASync)(sqlite3_file*, int flags, struct io_uring*, int*);
+  int (*xWaitASync)(sqlite3_file*, struct io_uring*, int*);
 };
 
 /*

@@ -21,7 +21,8 @@
 #ifndef SQLITE_OMIT_DISKIO
 #include "sqliteInt.h"
 #include "wal.h"
-
+#include "liburing.h"
+#include <sys/time.h>
 
 /******************* NOTES ON THE DESIGN OF THE PAGER ************************
 **
@@ -698,6 +699,10 @@ struct Pager {
   PCache *pPCache;            /* Pointer to page cache object */
 #ifndef SQLITE_OMIT_WAL
   Wal *pWal;                  /* Write-ahead log used by "journal_mode=wal" */
+  // zl:
+  struct io_uring queue;
+  /* The number of submited sqes in queue. echo added */
+  int submissionNum; 
   char *zWal;                 /* File name for write-ahead log */
 #endif
 };
@@ -4154,6 +4159,8 @@ int sqlite3PagerClose(Pager *pPager, sqlite3 *db){
   assert( db || pagerUseWal(pPager)==0 );
   assert( assert_pager_state(pPager) );
   disable_simulated_io_errors();
+  // zl:
+  io_uring_queue_exit(&pPager->queue);
   sqlite3BeginBenignMalloc();
   pagerFreeMapHdrs(pPager);
   /* pPager->errCode = 0; */
@@ -4329,7 +4336,10 @@ static int syncJournal(Pager *pPager, int newHdr){
         if( pPager->fullSync && 0==(iDc&SQLITE_IOCAP_SEQUENTIAL) ){
           PAGERTRACE(("SYNC journal of %d\n", PAGERID(pPager)));
           IOTRACE(("JSYNC %p\n", pPager))
-          rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags);
+          // zl: 
+          // rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags);
+          rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags, 
+          &pPager->queue, &pPager->submissionNum);
           if( rc!=SQLITE_OK ) return rc;
         }
         IOTRACE(("JHDR %p %lld\n", pPager, pPager->journalHdr));
@@ -4341,9 +4351,14 @@ static int syncJournal(Pager *pPager, int newHdr){
       if( 0==(iDc&SQLITE_IOCAP_SEQUENTIAL) ){
         PAGERTRACE(("SYNC journal of %d\n", PAGERID(pPager)));
         IOTRACE(("JSYNC %p\n", pPager))
-        rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags|
-          (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0)
-        );
+        // zl:
+        // rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags|
+        //   (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0)
+        // );
+        // zl: 
+        rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags|
+          (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0),
+        &pPager->queue, &pPager->submissionNum);
         if( rc!=SQLITE_OK ) return rc;
       }
 
@@ -4737,7 +4752,7 @@ int sqlite3PagerOpen(
 
   /* Set the output variable to NULL in case an error occurs. */
   *ppPager = 0;
-
+  
 #ifndef SQLITE_OMIT_MEMORYDB
   if( flags & PAGER_MEMORY ){
     memDb = 1;
@@ -4861,6 +4876,10 @@ int sqlite3PagerOpen(
     return SQLITE_NOMEM_BKPT;
   }
   pPager = (Pager*)pPtr;                  pPtr += ROUND8(sizeof(*pPager));
+// zl:
+  io_uring_queue_init(5, &(pPager->queue), 0);
+  pPager->submissionNum = 0; 
+
   pPager->pPCache = (PCache*)pPtr;        pPtr += ROUND8(pcacheSize);
   pPager->fd = (sqlite3_file*)pPtr;       pPtr += ROUND8(pVfs->szOsFile);
   pPager->sjfd = (sqlite3_file*)pPtr;     pPtr += journalFileSize;
@@ -6584,8 +6603,10 @@ int sqlite3PagerCommitPhaseOne(
       */
       rc = syncJournal(pPager, 0);
       if( rc!=SQLITE_OK ) goto commit_phase_one_exit;
-
+      
       pList = sqlite3PcacheDirtyList(pPager->pPCache);
+      // zl:
+      sqlite3OsWaitASync(pPager->jfd, &pPager->queue, &pPager->submissionNum);
 #ifdef SQLITE_ENABLE_BATCH_ATOMIC_WRITE
       if( bBatch ){
         rc = sqlite3OsFileControl(fd, SQLITE_FCNTL_BEGIN_ATOMIC_WRITE, 0);

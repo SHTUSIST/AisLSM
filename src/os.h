@@ -25,6 +25,7 @@
 ** necessary pre-processor macros for it.
 */
 #include "os_setup.h"
+#include "liburing.h"
 
 /* If the SET_FULLSYNC macro is not defined above, then make it
 ** a no-op
@@ -178,6 +179,10 @@ int sqlite3OsRead(sqlite3_file*, void*, int amt, i64 offset);
 int sqlite3OsWrite(sqlite3_file*, const void*, int amt, i64 offset);
 int sqlite3OsTruncate(sqlite3_file*, i64 size);
 int sqlite3OsSync(sqlite3_file*, int);
+/* zl: Add async and wait async unix calls */
+int sqlite3OsASync(sqlite3_file*, int, struct io_uring*, int*);
+int sqlite3OsWaitASync(sqlite3_file*, struct io_uring*, int*);
+
 int sqlite3OsFileSize(sqlite3_file*, i64 *pSize);
 int sqlite3OsLock(sqlite3_file*, int);
 int sqlite3OsUnlock(sqlite3_file*, int);

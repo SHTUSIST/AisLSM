@@ -44,6 +44,7 @@
 **      plus implementations of sqlite3_os_init() and sqlite3_os_end().
 */
 #include "sqliteInt.h"
+#include "liburing.h"
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
 
 /*
@@ -3811,6 +3812,67 @@ static int unixSync(sqlite3_file *id, int flags){
   return rc;
 }
 
+/* zl: Add async and wait async unix calls */
+static int unixASync(sqlite3_file *id, int flags, struct io_uring* queue, int* update){
+  int rc;
+  unixFile *pFile = (unixFile*)id;
+
+  int isDataOnly = (flags&SQLITE_SYNC_DATAONLY);
+  int isFullsync = (flags&0x0F)==SQLITE_SYNC_FULL;
+
+  /* Check that one of SQLITE_SYNC_NORMAL or FULL was passed */
+  assert((flags&0x0F)==SQLITE_SYNC_NORMAL
+      || (flags&0x0F)==SQLITE_SYNC_FULL
+  );
+
+  /* Unix cannot, but some systems may return SQLITE_FULL from here. This
+  ** line is to test that doing so does not cause any problems.
+  */
+  SimulateDiskfullError( return SQLITE_FULL );
+
+  assert( pFile );
+  OSTRACE(("SYNC    %-3d\n", pFile->h));
+
+  struct io_uring_sqe* sqe = io_uring_get_sqe(queue);
+  io_uring_prep_fsync(sqe, pFile->h, IORING_FSYNC_DATASYNC);
+  int ret = io_uring_submit(queue);
+  *update += ret;
+  rc = ret - 1; 
+
+  /* Also fsync the directory containing the file if the DIRSYNC flag
+  ** is set.  This is a one-time occurrence.  Many systems (examples: AIX)
+  ** are unable to fsync a directory, so ignore errors on the fsync.
+  */
+  if( pFile->ctrlFlags & UNIXFILE_DIRSYNC ){
+    int dirfd;
+    OSTRACE(("DIRSYNC %s (have_fullfsync=%d fullsync=%d)\n", pFile->zPath,
+            HAVE_FULLFSYNC, isFullsync));
+    rc = osOpenDirectory(pFile->zPath, &dirfd);
+    if( rc==SQLITE_OK ){
+      full_fsync(dirfd, 0, 0);
+      robust_close(pFile, dirfd, __LINE__);
+    }else{
+      assert( rc==SQLITE_CANTOPEN );
+      rc = SQLITE_OK;
+    }
+    pFile->ctrlFlags &= ~UNIXFILE_DIRSYNC;
+  }
+  return rc;
+}
+
+static int unixWaitASync(sqlite3_file *id, struct io_uring* uptr, int* update)
+{
+  int waitNum = *update;
+  for(int i = 0; i < waitNum; ++i)
+  {
+    struct io_uring_cqe* cqe = NULL;
+    io_uring_wait_cqe(uptr, &cqe);
+    io_uring_cqe_seen(uptr, cqe);
+  }
+  *update = 0;
+  return *update;
+}
+
 /*
 ** Truncate an open file to a specified size
 */
@@ -5531,6 +5593,7 @@ static int unixUnfetch(sqlite3_file *fd, i64 iOff, void *p){
 **   *  An I/O method finder function called FINDER that returns a pointer
 **      to the METHOD object in the previous bullet.
 */
+  //  zl:
 #define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)     \
 static const sqlite3_io_methods METHOD = {                                   \
    VERSION,                    /* iVersion */                                \
@@ -5552,6 +5615,8 @@ static const sqlite3_io_methods METHOD = {                                   \
    unixShmUnmap,               /* xShmUnmap */                               \
    unixFetch,                  /* xFetch */                                  \
    unixUnfetch,                /* xUnfetch */                                \
+   unixASync,  /*Async added*/  \
+   unixWaitASync, /* Wait async */  \
 };                                                                           \
 static const sqlite3_io_methods *FINDER##Impl(const char *z, unixFile *p){   \
   UNUSED_PARAMETER(z); UNUSED_PARAMETER(p);                                  \
