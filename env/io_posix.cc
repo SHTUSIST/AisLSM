@@ -42,7 +42,7 @@
 #include "util/string_util.h"
 #include "rocksdb/file_system.h"
 #include "db/version_set.h"
-
+#include <chrono>
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
 #define F_SET_RW_HINT (F_LINUX_SPECIFIC_BASE + 12)
@@ -222,8 +222,42 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
 
   return uptr;
 }
+float Urings::getWalWriteSpeed(){
+  // auto start = std::chrono::steady_clock::now();
+  // float time = std::chrono::duration_cast<std::chrono::milliseconds>(start - this->now).count();
+  // return this->WalWriteByte / time;
+  return this->WalWriteSpeed;
+}
+void Urings::resetWalWriteSpeed(){
+  auto start = std::chrono::steady_clock::now();
+  this->WalWriteSpeed = this-> WalWriteByte /std::chrono::duration_cast<std::chrono::milliseconds>(start - this->now).count();
+  this->now = start;
+  this->WalWriteByte = 0;
+  if(this->SpeedArray.size() < this->arrayNum){
+    this->SpeedArray.push_back(this->WalWriteSpeed);
+  }
+  else{
+    for(size_t i = 0; i < this->SpeedArray.size(); i++){
+      if(this->SpeedArray[i] < this->WalWriteSpeed){
+        this->SpeedArray[i] = this->WalWriteSpeed;
+        break;
+      }
+    }
+  }
+}
 
-
+  void Urings::setUpArray(size_t num){
+  arrayNum = num;
+  this->now = std::chrono::steady_clock::now();
+}
+float Urings::getTopXSpeed(){
+  float sum = 0;
+  for(auto e: this->SpeedArray){
+    sum += e;
+  }
+  return sum / this->SpeedArray.size();
+}
+//  = std::chrono::system_clock::now();
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name) {
   if (file_name.empty()) {

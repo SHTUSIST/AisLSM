@@ -467,6 +467,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     // We're optimistic, updating the stats before we successfully
     // commit.  That lets us release our leader status early.
     auto stats = default_cf_internal_stats_;
+    urings.WalWriteByte += total_byte_size;
     stats->AddDBStats(InternalStats::kIntStatsNumKeysWritten, total_count,
                       concurrent_update);
     RecordTick(stats_, NUMBER_KEYS_WRITTEN, total_count);
@@ -723,7 +724,7 @@ Status DBImpl::PipelinedWriteImpl(const WriteOptions& write_options,
       }
       write_thread_.UpdateLastSequence(current_sequence + total_count - 1);
     }
-
+    urings.WalWriteByte += total_byte_size;
     auto stats = default_cf_internal_stats_;
     stats->AddDBStats(InternalStats::kIntStatsNumKeysWritten, total_count);
     RecordTick(stats_, NUMBER_KEYS_WRITTEN, total_count);
@@ -967,6 +968,7 @@ Status DBImpl::WriteImplWALOnly(
   // We're optimistic, updating the stats before we successfully
   // commit.  That lets us release our leader status early.
   auto stats = default_cf_internal_stats_;
+  urings.WalWriteByte += total_byte_size;
   stats->AddDBStats(InternalStats::kIntStatsBytesWritten, total_byte_size,
                     concurrent_update);
   RecordTick(stats_, BYTES_WRITTEN, total_byte_size);
@@ -2040,6 +2042,7 @@ void DBImpl::NotifyOnMemTableSealed(ColumnFamilyData* /*cfd*/,
 // REQUIRES: this thread is currently at the front of the 2nd writer queue if
 // two_write_queues_ is true (This is to simplify the reasoning.)
 Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
+  urings.resetWalWriteSpeed();
   mutex_.AssertHeld();
   log::Writer* new_log = nullptr;
   MemTable* new_mem = nullptr;

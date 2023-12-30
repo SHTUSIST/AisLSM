@@ -31,6 +31,7 @@
 #include "liburing.h"
 #include <queue>
 #include <array>
+#include <chrono>
 // For non linux platform, the following macros are used only as place
 // holder.
 #if !(defined OS_LINUX) && !(defined CYGWIN) && !(defined OS_AIX)
@@ -85,6 +86,10 @@ class Urings{
     bool init_queues(uint16_t compaction_num = 512, uint8_t log_num = 1, uint16_t compaction_depth = 64, uint8_t log_depth = 1);
     bool init = false;
     void clear_all(uring_type queue_type);
+    void setUpArray(size_t num);
+    float getWalWriteSpeed();
+    void resetWalWriteSpeed();
+    float getTopXSpeed();
 
 
     // not synced. serve for input file of compaction
@@ -99,7 +104,7 @@ class Urings{
     std::mutex mtx;
 
     struct uring_queue** log_urings = nullptr;
-    
+    size_t WalWriteByte = 0;
   private: 
     uint16_t get_id(uint16_t num, uint16_t mask);
     struct uring_queue** compaction_urings = nullptr;
@@ -108,6 +113,10 @@ class Urings{
     uint16_t compaction_queue_depth = 0;
     uint8_t log_queue_depth = 0;
     bool bit;
+    float WalWriteSpeed = 0;
+    std::chrono::steady_clock::time_point now;
+    std::vector<float> SpeedArray;
+    size_t arrayNum = 0;
 };
 
 std::string IOErrorMsg(const std::string& context,

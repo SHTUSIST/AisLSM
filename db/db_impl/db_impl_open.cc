@@ -1646,6 +1646,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   {
     /* Init all queues */
     urings.init_queues(512, 4, 128,1);
+    urings.setUpArray(5);
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {
