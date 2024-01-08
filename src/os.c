@@ -110,6 +110,15 @@ int sqlite3OsWaitASync(sqlite3_file *id, struct io_uring* uptr, int* update)
 {
   return id->pMethods->xWaitASync(id, uptr, update);
 }
+int sqlite3OsSubmit(sqlite3_file *id, struct io_uring* uptr, int* acquireNum, int* submissionNum){
+  return id->pMethods->xSubmit(id, uptr, acquireNum, submissionNum);
+}
+int sqlite3OsAWrite(sqlite3_file *id, const void *pBuf, int amt, i64 offset, struct io_uring* uptr, int* update){
+  DO_OS_MALLOC_TEST(id);
+  return id->pMethods->xAWrite(id, pBuf, amt, offset, uptr, update);
+}
+
+
 
 int sqlite3OsFileSize(sqlite3_file *id, i64 *pSize){
   DO_OS_MALLOC_TEST(id);

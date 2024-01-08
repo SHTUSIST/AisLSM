@@ -860,6 +860,8 @@ struct sqlite3_io_methods {
     /* zl: Add async and wait async unix calls */
   int (*xASync)(sqlite3_file*, int flags, struct io_uring*, int*);
   int (*xWaitASync)(sqlite3_file*, struct io_uring*, int*);
+  int (*xSubmit)(sqlite3_file*, struct io_uring*, int*, int* );
+  int (*xAWrite)(sqlite3_file*, const void*, int iAmt, sqlite3_int64 iOfst, struct io_uring*, int*);
 };
 
 /*

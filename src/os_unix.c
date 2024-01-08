@@ -3577,6 +3577,29 @@ static int unixWrite(
   return SQLITE_OK;
 }
 
+static int unixAWrite(
+  sqlite3_file *id, 
+  const void *pBuf, 
+  int amt,
+  sqlite3_int64 offset,
+  struct io_uring* queue, 
+  int* update
+){
+  unixFile *pFile = (unixFile*)id;
+  assert( id );
+  assert( amt>0 );
+
+  struct io_uring_sqe* sqe = io_uring_get_sqe(queue);
+  void* buf = malloc(amt);
+  memcpy(buf, pBuf, amt);
+  
+  io_uring_prep_write(sqe, pFile->h, buf, amt, offset);
+  sqe->flags |= IOSQE_IO_LINK;
+  io_uring_sqe_set_data(sqe, buf);
+  *update += 1;
+  return SQLITE_OK;
+}
+
 #ifdef SQLITE_TEST
 /*
 ** Count the number of fullsyncs and normal syncs.  This is used to test
@@ -3812,6 +3835,19 @@ static int unixSync(sqlite3_file *id, int flags){
   return rc;
 }
 
+
+static int unixSubmit(sqlite3_file* id, struct io_uring* queue, int* acquireNum, int* submissionNum)
+{
+  int ret = io_uring_submit(queue);
+  if(ret > 0)
+  {
+    *submissionNum += *acquireNum;
+    *acquireNum = 0;
+    return SQLITE_OK;
+  }
+  return ret;
+}
+
 /* zl: Add async and wait async unix calls */
 static int unixASync(sqlite3_file *id, int flags, struct io_uring* queue, int* update){
   int rc;
@@ -3834,10 +3870,21 @@ static int unixASync(sqlite3_file *id, int flags, struct io_uring* queue, int* u
   OSTRACE(("SYNC    %-3d\n", pFile->h));
 
   struct io_uring_sqe* sqe = io_uring_get_sqe(queue);
+  if(sqe == NULL){
+    storeLastErrno(pFile, errno);
+    printf("submission fails\n");
+    return unixLogError(SQLITE_IOERR_FSYNC, "full_fsync", pFile->zPath);
+  }
   io_uring_prep_fsync(sqe, pFile->h, IORING_FSYNC_DATASYNC);
-  int ret = io_uring_submit(queue);
-  *update += ret;
-  rc = ret - 1; 
+  io_uring_sqe_set_data(sqe, NULL);
+  sqe->flags |= IOSQE_IO_LINK;
+  *update += 1;
+  rc = 0;
+  if(rc != SQLITE_OK){
+    storeLastErrno(pFile, errno);
+    printf("submission fails\n");
+    return unixLogError(SQLITE_IOERR_FSYNC, "full_fsync", pFile->zPath);
+  }
 
   /* Also fsync the directory containing the file if the DIRSYNC flag
   ** is set.  This is a one-time occurrence.  Many systems (examples: AIX)
@@ -3866,7 +3913,16 @@ static int unixWaitASync(sqlite3_file *id, struct io_uring* uptr, int* update)
   for(int i = 0; i < waitNum; ++i)
   {
     struct io_uring_cqe* cqe = NULL;
-    io_uring_wait_cqe(uptr, &cqe);
+    int rc = io_uring_wait_cqe(uptr, &cqe);
+    if(rc < 0){
+      printf("wait fails\n");
+    }
+    else{
+        void* data = io_uring_cqe_get_data(cqe);
+        if(data != NULL){
+          free(data);
+        }
+    }
     io_uring_cqe_seen(uptr, cqe);
   }
   *update = 0;
@@ -5617,7 +5673,9 @@ static const sqlite3_io_methods METHOD = {                                   \
    unixUnfetch,                /* xUnfetch */                                \
    unixASync,  /*Async added*/  \
    unixWaitASync, /* Wait async */  \
-};                                                                           \
+   unixSubmit,\
+   unixAWrite,\
+   };                                                                           \
 static const sqlite3_io_methods *FINDER##Impl(const char *z, unixFile *p){   \
   UNUSED_PARAMETER(z); UNUSED_PARAMETER(p);                                  \
   return &METHOD;                                                            \

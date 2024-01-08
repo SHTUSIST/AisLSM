@@ -703,6 +703,7 @@ struct Pager {
   struct io_uring queue;
   /* The number of submited sqes in queue. echo added */
   int submissionNum; 
+  int acquireNum;
   char *zWal;                 /* File name for write-ahead log */
 #endif
 };
@@ -4160,6 +4161,7 @@ int sqlite3PagerClose(Pager *pPager, sqlite3 *db){
   assert( assert_pager_state(pPager) );
   disable_simulated_io_errors();
   // zl:
+  // sqlite3OsWaitASync(pPager->jfd, &pPager->queue, &pPager->submissionNum);
   io_uring_queue_exit(&pPager->queue);
   sqlite3BeginBenignMalloc();
   pagerFreeMapHdrs(pPager);
@@ -4339,13 +4341,15 @@ static int syncJournal(Pager *pPager, int newHdr){
           // zl: 
           // rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags);
           rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags, 
-          &pPager->queue, &pPager->submissionNum);
+          &pPager->queue, &pPager->acquireNum);
           if( rc!=SQLITE_OK ) return rc;
         }
         IOTRACE(("JHDR %p %lld\n", pPager, pPager->journalHdr));
-        rc = sqlite3OsWrite(
+        rc = sqlite3OsAWrite(pPager->jfd, zHeader, sizeof(zHeader), pPager->journalHdr
+        , &pPager->queue, &pPager->acquireNum);
+        /*rc = sqlite3OsWrite(
             pPager->jfd, zHeader, sizeof(zHeader), pPager->journalHdr
-        );
+        );*/
         if( rc!=SQLITE_OK ) return rc;
       }
       if( 0==(iDc&SQLITE_IOCAP_SEQUENTIAL) ){
@@ -4358,10 +4362,10 @@ static int syncJournal(Pager *pPager, int newHdr){
         // zl: 
         rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags|
           (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0),
-        &pPager->queue, &pPager->submissionNum);
+        &pPager->queue, &pPager->acquireNum);
         if( rc!=SQLITE_OK ) return rc;
       }
-
+      sqlite3OsSubmit(pPager->jfd, &pPager->queue, &pPager->acquireNum, &pPager->submissionNum);
       pPager->journalHdr = pPager->journalOff;
       if( newHdr && 0==(iDc&SQLITE_IOCAP_SAFE_APPEND) ){
         pPager->nRec = 0;
@@ -4877,8 +4881,9 @@ int sqlite3PagerOpen(
   }
   pPager = (Pager*)pPtr;                  pPtr += ROUND8(sizeof(*pPager));
 // zl:
-  io_uring_queue_init(5, &(pPager->queue), 0);
+  io_uring_queue_init(50, &(pPager->queue), 2);
   pPager->submissionNum = 0; 
+  pPager->acquireNum = 0;
 
   pPager->pPCache = (PCache*)pPtr;        pPtr += ROUND8(pcacheSize);
   pPager->fd = (sqlite3_file*)pPtr;       pPtr += ROUND8(pVfs->szOsFile);
@@ -5001,7 +5006,7 @@ act_like_temp_file:
     pPager->noLock = 1;                /* Do no locking */
     readOnly = (vfsFlags&SQLITE_OPEN_READONLY);
   }
-
+  
   /* The following call to PagerSetPagesize() serves to set the value of
   ** Pager.pageSize and to allocate the Pager.pTmpSpace buffer.
   */
@@ -5010,7 +5015,7 @@ act_like_temp_file:
     rc = sqlite3PagerSetPagesize(pPager, &szPageDflt, -1);
     testcase( rc!=SQLITE_OK );
   }
-
+  
   /* Initialize the PCache object. */
   if( rc==SQLITE_OK ){
     nExtra = ROUND8(nExtra);

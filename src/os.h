@@ -182,6 +182,8 @@ int sqlite3OsSync(sqlite3_file*, int);
 /* zl: Add async and wait async unix calls */
 int sqlite3OsASync(sqlite3_file*, int, struct io_uring*, int*);
 int sqlite3OsWaitASync(sqlite3_file*, struct io_uring*, int*);
+int sqlite3OsAWrite(sqlite3_file *, const void *, int , i64 , struct io_uring* , int* );
+int sqlite3OsSubmit(sqlite3_file *, struct io_uring*, int* , int* );
 
 int sqlite3OsFileSize(sqlite3_file*, i64 *pSize);
 int sqlite3OsLock(sqlite3_file*, int);
