@@ -4337,10 +4337,11 @@ static int syncJournal(Pager *pPager, int newHdr){
           PAGERTRACE(("SYNC journal of %d\n", PAGERID(pPager)));
           IOTRACE(("JSYNC %p\n", pPager))
           // zl: 
-          // rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags);
-          rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags, 
-          &pPager->queue, &pPager->submissionNum);
+          rc = sqlite3OsSync(pPager->jfd, pPager->syncFlags);
+          // rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags, 
+          // &pPager->queue, &pPager->submissionNum);
           if( rc!=SQLITE_OK ) return rc;
+          // sqlite3OsWaitASync(pPager->jfd, &pPager->queue, &pPager->submissionNum);
         }
         IOTRACE(("JHDR %p %lld\n", pPager, pPager->journalHdr));
         rc = sqlite3OsWrite(
@@ -4356,6 +4357,7 @@ static int syncJournal(Pager *pPager, int newHdr){
         //   (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0)
         // );
         // zl: 
+        
         rc = sqlite3OsASync(pPager->jfd, pPager->syncFlags|
           (pPager->syncFlags==SQLITE_SYNC_FULL?SQLITE_SYNC_DATAONLY:0),
         &pPager->queue, &pPager->submissionNum);
@@ -4877,7 +4879,9 @@ int sqlite3PagerOpen(
   }
   pPager = (Pager*)pPtr;                  pPtr += ROUND8(sizeof(*pPager));
 // zl:
-  io_uring_queue_init(5, &(pPager->queue), 0);
+  int ret = io_uring_queue_init(20, &(pPager->queue), 2);
+  if(ret != SQLITE_OK)
+    printf("Init fails!\n");
   pPager->submissionNum = 0; 
 
   pPager->pPCache = (PCache*)pPtr;        pPtr += ROUND8(pcacheSize);
@@ -6603,9 +6607,9 @@ int sqlite3PagerCommitPhaseOne(
       */
       rc = syncJournal(pPager, 0);
       if( rc!=SQLITE_OK ) goto commit_phase_one_exit;
-      
+
       pList = sqlite3PcacheDirtyList(pPager->pPCache);
-      // zl:
+      // zl: //
       sqlite3OsWaitASync(pPager->jfd, &pPager->queue, &pPager->submissionNum);
 #ifdef SQLITE_ENABLE_BATCH_ATOMIC_WRITE
       if( bBatch ){

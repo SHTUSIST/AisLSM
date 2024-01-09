@@ -3834,10 +3834,22 @@ static int unixASync(sqlite3_file *id, int flags, struct io_uring* queue, int* u
   OSTRACE(("SYNC    %-3d\n", pFile->h));
 
   struct io_uring_sqe* sqe = io_uring_get_sqe(queue);
+  if(sqe == NULL){
+    storeLastErrno(pFile, errno);
+    printf("SQE fetching fails\n");
+    return unixLogError(SQLITE_IOERR_FSYNC, "full_fsync", pFile->zPath);
+  }
   io_uring_prep_fsync(sqe, pFile->h, IORING_FSYNC_DATASYNC);
   int ret = io_uring_submit(queue);
   *update += ret;
-  rc = ret - 1; 
+  rc = SQLITE_OK; 
+  // rc - ret - 1; 
+  // Submission fails may happens under multiple threads with kernel poll.
+  if(ret < 0){
+    storeLastErrno(pFile, errno);
+    printf("submission fails\n");
+    return unixLogError(SQLITE_IOERR_FSYNC, "full_fsync", pFile->zPath);
+  }
 
   /* Also fsync the directory containing the file if the DIRSYNC flag
   ** is set.  This is a one-time occurrence.  Many systems (examples: AIX)
@@ -3866,7 +3878,10 @@ static int unixWaitASync(sqlite3_file *id, struct io_uring* uptr, int* update)
   for(int i = 0; i < waitNum; ++i)
   {
     struct io_uring_cqe* cqe = NULL;
-    io_uring_wait_cqe(uptr, &cqe);
+    int rc = io_uring_wait_cqe(uptr, &cqe);
+    if(rc != SQLITE_OK){
+      return rc;
+    }
     io_uring_cqe_seen(uptr, cqe);
   }
   *update = 0;
