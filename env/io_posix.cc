@@ -42,7 +42,7 @@
 #include "util/string_util.h"
 #include "rocksdb/file_system.h"
 #include "db/version_set.h"
-
+#include <chrono>
 #if defined(OS_LINUX) && !defined(F_SET_RW_HINT)
 #define F_LINUX_SPECIFIC_BASE 1024
 #define F_SET_RW_HINT (F_LINUX_SPECIFIC_BASE + 12)
@@ -127,6 +127,29 @@ struct uring_queue* Urings::get_empty_element(uint32_t id)
   return uptr;
 }
 
+
+struct uring_queue* Urings::get_empty_element_for_log()
+{
+  uint32_t index = 0;
+  uint32_t counter_for_while = 0;
+  struct uring_queue* uptr = this->log_urings[index];
+  while(uptr->running)
+  {
+    if (counter_for_while > 4)
+    {
+      struct io_uring_cqe* cqe;
+      io_uring_wait_cqe(&uptr->uring, &cqe);
+      io_uring_cqe_seen(&uptr->uring, cqe);
+      break;
+    }
+    counter_for_while += 1;
+    index = (counter_for_while) %(this->log_queue_size);
+    uptr = this->log_urings[index];
+  }
+  uptr->running.store(true);
+  return uptr;
+}
+
 void Urings::clear_all(uring_type queue_type)
 {
   switch(queue_type)
@@ -199,8 +222,28 @@ struct uring_queue* Urings::wait_for_queue(struct uring_queue* uptr)
 
   return uptr;
 }
-
-
+float Urings::getWalWriteSpeed(){
+  auto start = std::chrono::steady_clock::now();
+  float time = std::chrono::duration_cast<std::chrono::milliseconds>(start - this->now).count();
+  return this->WalWriteByte / time;
+}
+void Urings::resetWalWriteSpeed(){
+  float speed = getWalWriteSpeed();
+  this->now = std::chrono::steady_clock::now();
+  this->WalWriteByte = 0;
+  
+}
+  void Urings::setUpArray(size_t num){
+  arrayNum = num;
+}
+float Urings::getTopXSpeed(){
+  float sum = 0;
+  for(auto e: this->SpeedArray){
+    sum += e;
+  }
+  return sum / this->SpeedArray.size();
+}
+//  = std::chrono::system_clock::now();
 std::string IOErrorMsg(const std::string& context,
                        const std::string& file_name) {
   if (file_name.empty()) {

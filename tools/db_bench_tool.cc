@@ -5023,7 +5023,7 @@ class Benchmark {
       if (FLAGS_rate_limiter_bytes_per_sec > 0) {
         options.rate_limiter.reset(NewGenericRateLimiter(
             FLAGS_rate_limiter_bytes_per_sec,
-            FLAGS_rate_limiter_refill_period_us, 10 /* fairness */,
+            FLAGS_rate_limiter_refill_period_us, 100 /* fairness */,
             // TODO: replace this with a more general FLAG for deciding
             // RateLimiter::Mode as now we also rate-limit foreground reads e.g,
             // Get()/MultiGet()

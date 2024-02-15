@@ -88,7 +88,7 @@ DBOptions SanitizeOptions(const std::string& dbname, const DBOptions& src,
 
   if (result.rate_limiter.get() != nullptr) {
     if (result.bytes_per_sync == 0) {
-      result.bytes_per_sync = 1024 * 1024;
+      // result.bytes_per_sync = 1024 * 1024;
     }
   }
 
@@ -1645,7 +1645,8 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   if(LIBURING_USE && !urings.init)
   {
     /* Init all queues */
-    urings.init_queues(512,1,128,1);
+    urings.init_queues(512, 4, 128,1);
+    urings.setUpArray(5);
   }
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {

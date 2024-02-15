@@ -2318,6 +2318,8 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     switch (get_context.State()) {
       case GetContext::kNotFound:
         // Keep searching in other files
+        // seek file miss happens. This could mean we might increase the priority of bg compaction
+        urings.allowed_seeks++;
         break;
       case GetContext::kMerge:
         // TODO: update per-level perfcontext user_key_return_count for kMerge
@@ -3254,8 +3256,10 @@ void VersionStorageInfo::ComputeCompactionScore(
               score);
         }
       } else {
-        score = static_cast<double>(num_sorted_runs) /
-                mutable_cf_options.level0_file_num_compaction_trigger;
+                score = 9* (static_cast<double>(num_sorted_runs) /
+                mutable_cf_options.level0_file_num_compaction_trigger);
+        // score = static_cast<double>(num_sorted_runs) /
+        //         mutable_cf_options.level0_file_num_compaction_trigger;
         if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
           // L0 files. Take into account size as well to avoid later giant

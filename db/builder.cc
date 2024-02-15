@@ -13,6 +13,9 @@
 #include <deque>
 #include <vector>
 
+// huyp: add log async
+#include "db/memtable.h"
+
 #include "db/blob/blob_file_builder.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/event_helpers.h"
@@ -312,7 +315,31 @@ Status BuildTable(
     TEST_SYNC_POINT("BuildTable:BeforeSyncTable");
     if (s.ok() && !empty) {
       StopWatch sw(ioptions.clock, ioptions.stats, TABLE_SYNC_MICROS);
-      *io_status = file_writer->Sync(ioptions.use_fsync);
+      // *io_status = file_writer->Sync(ioptions.use_fsync);
+
+      // wait for log sync completes
+      autovector<MemTable*>* parents=static_cast<autovector<MemTable*>*>(meta->parents);
+      // printf("Begin!\n");
+      if (LIKELY(parents!=nullptr)){
+        for(auto i : (*parents)){
+          if (i->uq)
+          {
+            // printf("Wait! %p\n", i->uq);
+            // file_writer->WaitASync(i->uq);
+            struct io_uring_cqe *cqe;
+            int ret = io_uring_wait_cqe(&i->uq->uring, &cqe);
+            if(UNLIKELY(ret < 0))
+            {
+              printf("invalid io_uring_wait_cqe\n");
+              return s;
+            }
+            else{
+              io_uring_cqe_seen(&i->uq->uring, cqe);
+              (i->uq)->running.store(false);
+            }
+          }
+        }
+      }
     }
     TEST_SYNC_POINT("BuildTable:BeforeCloseTableFile");
     if (s.ok() && io_status->ok() && !empty) {
