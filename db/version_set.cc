@@ -3196,6 +3196,29 @@ void VersionStorageInfo::ComputeCompactionScore(
   // maintaining it to be over 1.0, we scale the original score by 10x
   // if it is larger than 1.0.
   const double kScoreScale = 10.0;
+
+  // huyp: change score_adjustment
+  // check whether enough read request happens in the previous period
+  // if not happen, lower the score to avoid too many compactions
+  // set the boud to avoid score overflow
+  const double lower_bound = 1.0 /16;
+  const double upper_bound = 16.0;
+  bool  adjust_l0 = false;
+
+  // too many seek misses, do more compactions
+  if ( (urings.allowed_seeks>32) && (urings.score_adjustment < upper_bound) ) {
+    urings.score_adjustment *=2.0;  
+  }
+  
+  // not too many read requests, lower the frequency
+  if ( (urings.allowed_seeks<8) && (urings.score_adjustment > lower_bound) )  {
+    urings.score_adjustment /=2.0; 
+    adjust_l0 = true;
+  }
+
+  urings.allowed_seeks=0;
+
+
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
     if (level == 0) {
@@ -3256,10 +3279,8 @@ void VersionStorageInfo::ComputeCompactionScore(
               score);
         }
       } else {
-                score = 9* (static_cast<double>(num_sorted_runs) /
-                mutable_cf_options.level0_file_num_compaction_trigger);
-        // score = static_cast<double>(num_sorted_runs) /
-        //         mutable_cf_options.level0_file_num_compaction_trigger;
+        score = static_cast<double>(num_sorted_runs) /
+                mutable_cf_options.level0_file_num_compaction_trigger;
         if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
           // L0 files. Take into account size as well to avoid later giant
@@ -3304,6 +3325,11 @@ void VersionStorageInfo::ComputeCompactionScore(
           }
         }
       }
+      if (adjust_l0)    
+      {
+        score /= 2;
+      }
+      
     } else {
       // Compute the ratio of current size to size limit.
       uint64_t level_bytes_no_compacting = 0;
@@ -3332,6 +3358,8 @@ void VersionStorageInfo::ComputeCompactionScore(
         total_downcompact_bytes +=
             static_cast<double>(level_total_bytes - MaxBytesForLevel(level));
       }
+
+      score *= urings.score_adjustment;
     }
     compaction_level_[level] = level;
     compaction_score_[level] = score;

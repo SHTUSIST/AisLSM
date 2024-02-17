@@ -104,6 +104,7 @@ class Urings{
     std::mutex mtx;
 
     uint32_t allowed_seeks=0;
+    double score_adjustment = 1.0;
     struct uring_queue** log_urings = nullptr;
     
   private: 
