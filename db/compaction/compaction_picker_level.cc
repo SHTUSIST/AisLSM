@@ -18,6 +18,7 @@
 #include "test_util/sync_point.h"
 
 namespace ROCKSDB_NAMESPACE {
+  extern Urings urings;
 
 bool LevelCompactionPicker::NeedsCompaction(
     const VersionStorageInfo* vstorage) const {
@@ -36,10 +37,40 @@ bool LevelCompactionPicker::NeedsCompaction(
   if (!vstorage->FilesMarkedForForcedBlobGC().empty()) {
     return true;
   }
+
+  // huyp: change score_adjustment
+  // check whether enough read request happens in the previous period
+  // if not happen, lower the score to avoid too many compactions
+  // set the boud to avoid score overflow
+  const double lower_bound = 1.0 /8;
+  const double upper_bound = 8.0;
+
+  // not too many read requests, lower the frequency
+  if ( (urings.allowed_seeks<8) && (urings.score_adjustment < upper_bound) ) {
+    urings.score_adjustment *=2.0;  
+  }
+  
+  // too many seek misses, do more compactions
+  if ( (urings.allowed_seeks>8) && (urings.score_adjustment > lower_bound) )  {
+    urings.score_adjustment /=2.0; 
+  }
+
+  urings.allowed_seeks=0;
+  
+
   for (int i = 0; i <= vstorage->MaxInputLevel(); i++) {
-    if (vstorage->CompactionScore(i) >= 1) { // 1.2
+    if (vstorage->CompactionScore(i) >= urings.score_adjustment) { 
       return true;
     }
+
+    // check l0 whether meets the condition
+
+    // find l0 level
+    // if (vstorage->CompactionScoreLevel(i)==0){
+    //   if (vstorage->CompactionScore(i) >= 1.0) { 
+    //     return true;
+    //   }
+    // }
   }
   return false;
 }

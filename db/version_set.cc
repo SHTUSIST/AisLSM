@@ -3197,28 +3197,6 @@ void VersionStorageInfo::ComputeCompactionScore(
   // if it is larger than 1.0.
   const double kScoreScale = 10.0;
 
-  // huyp: change score_adjustment
-  // check whether enough read request happens in the previous period
-  // if not happen, lower the score to avoid too many compactions
-  // set the boud to avoid score overflow
-  const double lower_bound = 1.0 /16;
-  const double upper_bound = 16.0;
-  bool  adjust_l0 = false;
-
-  // too many seek misses, do more compactions
-  if ( (urings.allowed_seeks>32) && (urings.score_adjustment < upper_bound) ) {
-    urings.score_adjustment *=2.0;  
-  }
-  
-  // not too many read requests, lower the frequency
-  if ( (urings.allowed_seeks<8) && (urings.score_adjustment > lower_bound) )  {
-    urings.score_adjustment /=2.0; 
-    adjust_l0 = true;
-  }
-
-  urings.allowed_seeks=0;
-
-
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
     if (level == 0) {
@@ -3325,11 +3303,7 @@ void VersionStorageInfo::ComputeCompactionScore(
           }
         }
       }
-      if (adjust_l0)    
-      {
-        score /= 2;
-      }
-      
+      score *=6;
     } else {
       // Compute the ratio of current size to size limit.
       uint64_t level_bytes_no_compacting = 0;
@@ -3359,7 +3333,6 @@ void VersionStorageInfo::ComputeCompactionScore(
             static_cast<double>(level_total_bytes - MaxBytesForLevel(level));
       }
 
-      score *= urings.score_adjustment;
     }
     compaction_level_[level] = level;
     compaction_score_[level] = score;
